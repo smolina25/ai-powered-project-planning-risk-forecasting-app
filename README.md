@@ -1,4 +1,4 @@
-# AI-Powered-PM-Intelligence
+# AI-Powered-Project-Planning-Risk-Forecasting-App
 AI-Powered Project Management Intelligence: Workflow Efficiency, Risk &amp; Delay Prediction
 
 
