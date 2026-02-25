@@ -51,38 +51,6 @@ This app moves project management from **reactive** to **predictive**. Instead o
 
 ---
 
-## Project Structure
-
-```
-ai-project-planner/
-├── app.py
-├── requirements.txt
-├── .env
-└── src/
-    ├── config.py
-    ├── ai/
-    │   ├── schema.py          # Pydantic task schema
-    │   ├── prompt.py          # Prompt template
-    │   ├── llm_client.py      # Groq API client
-    │   ├── mock_data.py       # Mock plan for dev/testing
-    │   └── task_generator.py  # Task generation pipeline
-    ├── modeling/
-    │   ├── graph_builder.py   # NetworkX DAG construction
-    │   └── critical_path.py   # Longest path computation
-    ├── simulation/
-    │   └── monte_carlo.py     # Monte Carlo engine
-    ├── analytics/
-    │   ├── metrics.py         # P50, P80, delay probability
-    │   ├── risk_drivers.py    # Critical path frequency ranking
-    │   └── scenarios.py       # Scenario comparison
-    ├── visualization/
-    │   └── charts.py          # Plotly histogram
-    └── utils/
-        └── errors.py          # Custom exceptions
-```
-
----
-
 ## Installation
 
 ### 1. Clone the repository
