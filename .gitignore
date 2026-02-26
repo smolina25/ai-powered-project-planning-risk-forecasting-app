@@ -138,6 +138,8 @@ celerybeat.pid
 .env
 .envrc
 .venv
+data/*.db
+.streamlit/secrets.toml
 env/
 venv/
 ENV/
