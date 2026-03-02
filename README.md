@@ -81,6 +81,15 @@ python -m venv .venv
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
+**`Windows` (Git Bash)**
+```Git Bash
+# Set up Python environment
+pyenv local 3.12.12
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
 1. Create and activate the environment:
    ```bash
