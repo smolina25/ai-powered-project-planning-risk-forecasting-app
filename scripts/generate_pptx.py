@@ -8,7 +8,7 @@ from xml.sax.saxutils import escape
 
 
 SOURCE_MD = Path("presentation/powerpoint-ready-deck.md")
-OUTPUT_PPTX = Path("presentation/ProjectSense-Capstone.pptx")
+OUTPUT_PPTX = Path("presentation/certAIn-Project-Intelligence-Capstone.pptx")
 
 
 def parse_slides(markdown_text: str) -> list[tuple[str, list[str]]]:
@@ -177,7 +177,7 @@ def build_core_xml() -> str:
         "xmlns:dcterms=\"http://purl.org/dc/terms/\" "
         "xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" "
         "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
-        "<dc:title>ProjectSense AI Capstone</dc:title>"
+        "<dc:title>certAIn Project Intelligence Capstone</dc:title>"
         "<dc:creator>Capstone Team</dc:creator>"
         "<cp:lastModifiedBy>Codex</cp:lastModifiedBy>"
         f"<dcterms:created xsi:type=\"dcterms:W3CDTF\">{now}</dcterms:created>"

@@ -1,45 +1,158 @@
 {
-  "dataset_path": "/Users/santiagomolina/Documents/Neue Fische Capstone Project/construction_dataset.csv",
+  "model_version": "v1-advisory-multimodel",
+  "trained_at_utc": "2026-03-09T15:20:35.073890+00:00",
+  "dataset_path": "/Users/meysamehshojaei/aipm-1711/ai-powered-project-planning-risk-forecasting-app/data/construction_dataset.csv",
+  "dataset_sha256": "8a62a6ed2b65e13bb313b64a33b0996ddbc696cba09de5610719f927a88b890e",
   "n_rows": 1300,
   "n_features": 8,
+  "feature_columns": [
+    "Task_Duration_Days",
+    "Labor_Required",
+    "Equipment_Units",
+    "Material_Cost_USD",
+    "Start_Constraint",
+    "Resource_Constraint_Score",
+    "Site_Constraint_Score",
+    "Dependency_Count"
+  ],
+  "target_column": "Risk_Level",
+  "seed": 42,
+  "selection_metric": "cv_macro_f1_mean",
+  "selection_reason": "Winner selected by highest cross-validated macro F1 so minority risk classes matter alongside overall accuracy.",
+  "selected_model_name": "hist_gradient_boosting",
   "baseline_accuracy": 0.5076923076923077,
   "baseline_macro_f1": 0.22448979591836735,
-  "final_accuracy": 0.4346153846153846,
-  "final_macro_f1": 0.2642565131529478,
-  "cv_macro_f1_mean": 0.2736531192462427,
-  "cv_macro_f1_std": 0.0039196289751317085,
+  "final_accuracy": 0.39615384615384613,
+  "final_macro_f1": 0.30768536063165336,
+  "cv_macro_f1_mean": 0.3027619167381423,
+  "cv_macro_f1_std": 0.015272830817699715,
+  "classification_report": {
+    "High": {
+      "precision": 0.17857142857142858,
+      "recall": 0.09433962264150944,
+      "f1-score": 0.12345679012345678,
+      "support": 53.0
+    },
+    "Low": {
+      "precision": 0.49375,
+      "recall": 0.5984848484848485,
+      "f1-score": 0.541095890410959,
+      "support": 132.0
+    },
+    "Medium": {
+      "precision": 0.2638888888888889,
+      "recall": 0.25333333333333335,
+      "f1-score": 0.2585034013605442,
+      "support": 75.0
+    },
+    "accuracy": 0.39615384615384613,
+    "macro avg": {
+      "precision": 0.31207010582010586,
+      "recall": 0.3153859348198971,
+      "f1-score": 0.30768536063165336,
+      "support": 260.0
+    },
+    "weighted avg": {
+      "precision": 0.3631959706959707,
+      "recall": 0.39615384615384613,
+      "f1-score": 0.3744447019724254,
+      "support": 260.0
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "High",
+      "Low",
+      "Medium"
+    ],
+    "values": [
+      [
+        5,
+        32,
+        16
+      ],
+      [
+        16,
+        79,
+        37
+      ],
+      [
+        7,
+        49,
+        19
+      ]
+    ]
+  },
   "feature_importance": [
     {
-      "feature": "Material_Cost_USD",
-      "importance": 0.16294748187108463
-    },
-    {
-      "feature": "Resource_Constraint_Score",
-      "importance": 0.1464224069478988
-    },
-    {
-      "feature": "Site_Constraint_Score",
-      "importance": 0.14313750214392298
-    },
-    {
-      "feature": "Task_Duration_Days",
-      "importance": 0.14208139268188058
-    },
-    {
-      "feature": "Start_Constraint",
-      "importance": 0.12917545378036152
-    },
-    {
       "feature": "Labor_Required",
-      "importance": 0.11796866815334568
+      "importance": 0.01841835298572923
     },
     {
       "feature": "Equipment_Units",
-      "importance": 0.09018419683949551
+      "importance": 0.011937495639592038
+    },
+    {
+      "feature": "Resource_Constraint_Score",
+      "importance": 0.00708093721293385
+    },
+    {
+      "feature": "Task_Duration_Days",
+      "importance": 0.0002849439211596897
+    },
+    {
+      "feature": "Site_Constraint_Score",
+      "importance": -0.0010667308987431883
     },
     {
       "feature": "Dependency_Count",
-      "importance": 0.0680828975820104
+      "importance": -0.005670976743929479
+    },
+    {
+      "feature": "Start_Constraint",
+      "importance": -0.011628378546612235
+    },
+    {
+      "feature": "Material_Cost_USD",
+      "importance": -0.015911533891425137
     }
-  ]
+  ],
+  "model_comparison": [
+    {
+      "model_name": "hist_gradient_boosting",
+      "test_accuracy": 0.39615384615384613,
+      "test_macro_f1": 0.30768536063165336,
+      "test_weighted_f1": 0.3744447019724254,
+      "cv_macro_f1_mean": 0.3027619167381423,
+      "cv_macro_f1_std": 0.015272830817699715
+    },
+    {
+      "model_name": "extra_trees",
+      "test_accuracy": 0.4230769230769231,
+      "test_macro_f1": 0.28965279756815804,
+      "test_weighted_f1": 0.37489124120393713,
+      "cv_macro_f1_mean": 0.28033291036533414,
+      "cv_macro_f1_std": 0.016814832679882263
+    },
+    {
+      "model_name": "logistic_regression",
+      "test_accuracy": 0.3346153846153846,
+      "test_macro_f1": 0.33035569948321625,
+      "test_weighted_f1": 0.3418674252954067,
+      "cv_macro_f1_mean": 0.27524939197898823,
+      "cv_macro_f1_std": 0.012120619035039902
+    },
+    {
+      "model_name": "random_forest",
+      "test_accuracy": 0.4346153846153846,
+      "test_macro_f1": 0.2642565131529478,
+      "test_weighted_f1": 0.35851849991460805,
+      "cv_macro_f1_mean": 0.2736531192462427,
+      "cv_macro_f1_std": 0.0039196289751317085
+    }
+  ],
+  "artifacts": {
+    "model_path": "/Users/meysamehshojaei/aipm-1711/ai-powered-project-planning-risk-forecasting-app/models/risk_classifier.joblib",
+    "metrics_path": "/Users/meysamehshojaei/aipm-1711/ai-powered-project-planning-risk-forecasting-app/models/risk_model_metrics.json"
+  }
 }

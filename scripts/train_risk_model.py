@@ -3,17 +3,23 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from joblib import dump
+from sklearn.compose import ColumnTransformer
 from sklearn.dummy import DummyClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.ensemble import ExtraTreesClassifier, HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 
 TARGET_COLUMN = "Risk_Level"
@@ -30,9 +36,21 @@ FEATURE_COLUMNS = [
 ]
 
 
+@dataclass(frozen=True)
+class CandidateResult:
+    name: str
+    test_accuracy: float
+    test_macro_f1: float
+    test_weighted_f1: float
+    cv_macro_f1_mean: float
+    cv_macro_f1_std: float
+    classification_report: dict[str, Any]
+    confusion_matrix: list[list[int]]
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train ProjectSense risk classifier and save model + metrics metadata."
+        description="Train certAIn Project Intelligence risk classifier and save model + metrics metadata."
     )
     parser.add_argument(
         "--dataset",
@@ -83,6 +101,149 @@ def _validate_dataset(df: pd.DataFrame) -> None:
         raise ValueError("Target column must contain at least 2 classes.")
 
 
+def _build_candidate_models(seed: int) -> dict[str, Pipeline]:
+    scaled_numeric = ColumnTransformer(
+        [("numeric", StandardScaler(), FEATURE_COLUMNS)],
+        remainder="drop",
+    )
+    return {
+        "logistic_regression": Pipeline(
+            steps=[
+                ("scaler", scaled_numeric),
+                (
+                    "classifier",
+                    LogisticRegression(
+                        max_iter=2000,
+                        class_weight="balanced",
+                        solver="lbfgs",
+                    ),
+                ),
+            ]
+        ),
+        "random_forest": Pipeline(
+            steps=[
+                (
+                    "classifier",
+                    RandomForestClassifier(
+                        n_estimators=400,
+                        max_depth=None,
+                        min_samples_leaf=2,
+                        class_weight="balanced",
+                        random_state=seed,
+                        n_jobs=-1,
+                    ),
+                )
+            ]
+        ),
+        "extra_trees": Pipeline(
+            steps=[
+                (
+                    "classifier",
+                    ExtraTreesClassifier(
+                        n_estimators=500,
+                        max_depth=None,
+                        min_samples_leaf=2,
+                        class_weight="balanced",
+                        random_state=seed,
+                        n_jobs=-1,
+                    ),
+                )
+            ]
+        ),
+        "hist_gradient_boosting": Pipeline(
+            steps=[
+                (
+                    "classifier",
+                    HistGradientBoostingClassifier(
+                        learning_rate=0.06,
+                        max_depth=6,
+                        max_iter=250,
+                        random_state=seed,
+                    ),
+                )
+            ]
+        ),
+    }
+
+
+def _cross_val_macro_f1(
+    model: Pipeline,
+    X: pd.DataFrame,
+    y: pd.Series,
+    cv: StratifiedKFold,
+) -> np.ndarray:
+    try:
+        return cross_val_score(model, X, y, cv=cv, scoring="f1_macro", n_jobs=-1)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Parallel CV failed ({type(exc).__name__}: {exc}). Retrying with n_jobs=1.")
+        return cross_val_score(model, X, y, cv=cv, scoring="f1_macro", n_jobs=1)
+
+
+def _evaluate_candidate(
+    name: str,
+    model: Pipeline,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+    X: pd.DataFrame,
+    y: pd.Series,
+    cv: StratifiedKFold,
+) -> CandidateResult:
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+    cv_scores = _cross_val_macro_f1(model, X, y, cv)
+    labels = sorted(str(item) for item in y.unique())
+    confusion = confusion_matrix(y_test, predictions, labels=labels)
+    report = classification_report(
+        y_test,
+        predictions,
+        labels=labels,
+        output_dict=True,
+        zero_division=0,
+    )
+    return CandidateResult(
+        name=name,
+        test_accuracy=float(accuracy_score(y_test, predictions)),
+        test_macro_f1=float(f1_score(y_test, predictions, average="macro")),
+        test_weighted_f1=float(f1_score(y_test, predictions, average="weighted")),
+        cv_macro_f1_mean=float(cv_scores.mean()),
+        cv_macro_f1_std=float(cv_scores.std()),
+        classification_report=report,
+        confusion_matrix=[[int(value) for value in row] for row in confusion.tolist()],
+    )
+
+
+def _compute_feature_importance(
+    model: Pipeline,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+    seed: int,
+) -> pd.DataFrame:
+    estimator = model.named_steps.get("classifier", model)
+
+    if hasattr(estimator, "feature_importances_"):
+        importances = np.asarray(estimator.feature_importances_, dtype=float)
+    elif hasattr(estimator, "coef_"):
+        coefficients = np.asarray(estimator.coef_, dtype=float)
+        importances = np.mean(np.abs(coefficients), axis=0)
+    else:
+        permutation = permutation_importance(
+            model,
+            X_test,
+            y_test,
+            scoring="f1_macro",
+            n_repeats=15,
+            random_state=seed,
+            n_jobs=1,
+        )
+        importances = np.asarray(permutation.importances_mean, dtype=float)
+
+    return pd.DataFrame(
+        {"feature": FEATURE_COLUMNS, "importance": importances}
+    ).sort_values("importance", ascending=False)
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -116,43 +277,40 @@ def main() -> None:
     baseline_acc = accuracy_score(y_test, baseline_pred)
     baseline_f1_macro = f1_score(y_test, baseline_pred, average="macro")
 
-    model = Pipeline(
-        steps=[
-            (
-                "classifier",
-                RandomForestClassifier(
-                    n_estimators=400,
-                    max_depth=None,
-                    min_samples_leaf=2,
-                    class_weight="balanced",
-                    random_state=args.seed,
-                    n_jobs=-1,
-                ),
-            )
-        ]
-    )
-    model.fit(X_train, y_train)
-
-    y_pred = model.predict(X_test)
-    final_acc = accuracy_score(y_test, y_pred)
-    final_f1_macro = f1_score(y_test, y_pred, average="macro")
-
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=args.seed)
-    try:
-        cv_scores = cross_val_score(model, X, y, cv=cv, scoring="f1_macro", n_jobs=-1)
-    except Exception as exc:  # noqa: BLE001
-        print(f"Parallel CV failed ({type(exc).__name__}: {exc}). Retrying with n_jobs=1.")
-        cv_scores = cross_val_score(model, X, y, cv=cv, scoring="f1_macro", n_jobs=1)
+    candidate_models = _build_candidate_models(args.seed)
+    candidate_results: list[CandidateResult] = []
+    for name, model in candidate_models.items():
+        result = _evaluate_candidate(
+            name=name,
+            model=model,
+            X_train=X_train,
+            X_test=X_test,
+            y_train=y_train,
+            y_test=y_test,
+            X=X,
+            y=y,
+            cv=cv,
+        )
+        candidate_results.append(result)
 
-    rf = model.named_steps["classifier"]
-    importance_df = pd.DataFrame(
-        {
-            "feature": FEATURE_COLUMNS,
-            "importance": rf.feature_importances_,
-        }
-    ).sort_values("importance", ascending=False)
+    candidate_results.sort(
+        key=lambda item: (
+            item.cv_macro_f1_mean,
+            item.test_macro_f1,
+            item.test_accuracy,
+        ),
+        reverse=True,
+    )
+    selected_result = candidate_results[0]
+    selected_model = candidate_models[selected_result.name]
+    selected_model.fit(X_train, y_train)
+    final_predictions = selected_model.predict(X_test)
+    final_acc = accuracy_score(y_test, final_predictions)
+    final_f1_macro = f1_score(y_test, final_predictions, average="macro")
+    importance_df = _compute_feature_importance(selected_model, X_test, y_test, args.seed)
 
-    dump(model, model_out)
+    dump(selected_model, model_out)
 
     trained_at = datetime.now(tz=UTC).isoformat()
     default_version = datetime.now(tz=UTC).strftime("v%Y.%m.%d.%H%M")
@@ -169,14 +327,35 @@ def main() -> None:
         "feature_columns": FEATURE_COLUMNS,
         "target_column": TARGET_COLUMN,
         "seed": int(args.seed),
+        "selection_metric": "cv_macro_f1_mean",
+        "selection_reason": (
+            "Winner selected by highest cross-validated macro F1 so minority risk classes "
+            "matter alongside overall accuracy."
+        ),
+        "selected_model_name": selected_result.name,
         "baseline_accuracy": float(baseline_acc),
         "baseline_macro_f1": float(baseline_f1_macro),
         "final_accuracy": float(final_acc),
         "final_macro_f1": float(final_f1_macro),
-        "cv_macro_f1_scores": [float(item) for item in np.round(cv_scores, 6)],
-        "cv_macro_f1_mean": float(cv_scores.mean()),
-        "cv_macro_f1_std": float(cv_scores.std()),
+        "cv_macro_f1_mean": float(selected_result.cv_macro_f1_mean),
+        "cv_macro_f1_std": float(selected_result.cv_macro_f1_std),
+        "classification_report": selected_result.classification_report,
+        "confusion_matrix": {
+            "labels": sorted(str(item) for item in y.unique()),
+            "values": selected_result.confusion_matrix,
+        },
         "feature_importance": importance_df.to_dict(orient="records"),
+        "model_comparison": [
+            {
+                "model_name": item.name,
+                "test_accuracy": float(item.test_accuracy),
+                "test_macro_f1": float(item.test_macro_f1),
+                "test_weighted_f1": float(item.test_weighted_f1),
+                "cv_macro_f1_mean": float(item.cv_macro_f1_mean),
+                "cv_macro_f1_std": float(item.cv_macro_f1_std),
+            }
+            for item in candidate_results
+        ],
         "artifacts": {
             "model_path": str(model_out.resolve()),
             "metrics_path": str(metrics_out.resolve()),
@@ -187,10 +366,11 @@ def main() -> None:
 
     print("Training complete.")
     print(f"model_version={model_version}")
+    print(f"selected_model={selected_result.name}")
     print(f"dataset_sha256={dataset_hash}")
     print(f"final_accuracy={final_acc:.4f}")
     print(f"final_macro_f1={final_f1_macro:.4f}")
-    print(f"cv_macro_f1_mean={cv_scores.mean():.4f}")
+    print(f"cv_macro_f1_mean={selected_result.cv_macro_f1_mean:.4f}")
     print(f"model_out={model_out.resolve()}")
     print(f"metrics_out={metrics_out.resolve()}")
 

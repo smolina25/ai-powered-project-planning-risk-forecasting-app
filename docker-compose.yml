@@ -1,5 +1,5 @@
 services:
-  projectsense-app:
+  certain-project-intelligence-app:
     build: .
     ports:
       - "8501:8501"
