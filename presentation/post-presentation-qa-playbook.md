@@ -77,35 +77,39 @@ Evidence: explicit scope policy in `PROJECT_WORKFLOW.md` and `ai-planning-risk-a
 Short answer: We use a supervised classifier as an advisory signal at task level; Monte Carlo and scenarios remain primary decision engines.
 Evidence: `app.py` (ML Risk Scoring tab), `src/ml/`, `models/risk_classifier.joblib`.
 
-## 19) Why no RAG/agents/MCP in this version?
+## 19) Why did you choose this advisory model?
+Short answer: We benchmarked several model families and selected the one with the best cross-validated macro F1 because the `High` risk minority class matters more than raw accuracy alone.
+Evidence: `docs/model-comparison.md`, `models/risk_model_metrics.json`, `scripts/train_risk_model.py`.
+
+## 20) Why no RAG/agents/MCP in this version?
 Short answer: Not needed for MVP outcome; omitted intentionally to keep the system reliable and explainable.
 Evidence: scope decisions in `PROJECT_WORKFLOW.md`.
 
-## 20) Why no cloud deployment?
+## 21) Why no cloud deployment?
 Short answer: Local + Streamlit-ready architecture was enough for capstone timeline; cloud is a roadmap item.
 Evidence: deployment section in `README.md`; roadmap in deck files.
 
-## 21) What are the main limitations?
+## 22) What are the main limitations?
 Short answer: Quality depends on prompt input; no multi-user auth; single-project focus.
-Evidence: `presentation/stakeholder-deck.md`, app scope.
+Evidence: `presentation/powerpoint-ready-deck.md`, app scope.
 
-## 22) How is stakeholder value measured?
+## 23) How is stakeholder value measured?
 Short answer: Better commitment quality, earlier risk visibility, and faster planning cycles.
-Evidence: value slides in `presentation/stakeholder-deck.md`; KPIs in `PROJECT_WORKFLOW.md`.
+Evidence: value slides in `presentation/powerpoint-ready-deck.md`; KPIs in `PROJECT_WORKFLOW.md`.
 
-## 23) How did the two of you split work?
+## 24) How did the two of you split work?
 Short answer: Product/presentation ownership and engineering/analytics ownership, with shared QA and final packaging.
 Evidence: `PROJECT_WORKFLOW.md`; clean notebook sections 14-17.
 
-## 24) How did you manage delivery in 4 weeks?
+## 25) How did you manage delivery in 4 weeks?
 Short answer: Week-based milestones, clear DoR/DoD, and priority on demo reliability and correctness.
 Evidence: `PROJECT_WORKFLOW.md`.
 
-## 25) What is the next version?
+## 26) What is the next version?
 Short answer: Portfolio dashboard, external PM tool integrations, and collaboration/auth.
-Evidence: roadmap in `presentation/stakeholder-deck.md` and `presentation/powerpoint-ready-deck.md`.
+Evidence: roadmap in `presentation/powerpoint-ready-deck.md`.
 
-## 26) What should we do if asked something unknown?
+## 27) What should we do if asked something unknown?
 Short answer:
 - State current implemented scope clearly.
 - Give reason for design choice.
@@ -116,5 +120,5 @@ Template:
 We intentionally deferred Y to keep reliability high in 4 weeks.  
 Next step would be Z, starting with [specific module/integration]."
 
-## 27) 30-Second Closing Answer
+## 28) 30-Second Closing Answer
 "This project is not just task generation. It is a decision-support system: validate plan quality, quantify schedule risk, identify delay drivers, and compare mitigation scenarios before execution begins."

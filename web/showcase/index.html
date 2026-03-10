@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="certAIn Project Intelligence is an AI-powered project planning and risk forecasting app that turns project briefs into validated plans, probabilistic schedule forecasts, and scenario-backed decisions."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="./config.js"></script>
+    <script defer src="./main.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell topbar-inner">
+        <div class="brand-mark"><span>certAIn</span> Project Intelligence</div>
+        <nav class="topnav">
+          <a href="#problem">Problem</a>
+          <a href="#solution">Solution</a>
+          <a href="#evidence">Evidence</a>
+          <a href="#deliverables">Deliverables</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="shell hero-grid">
+          <div>
+            <div class="eyebrow">Capstone Project Showcase</div>
+            <h1><span data-brand></span></h1>
+            <p class="lead" data-app-title></p>
+            <p class="lead">
+              A decision-support product that transforms a plain-language project brief into a
+              validated task plan, a probabilistic delivery forecast, and scenario-backed action
+              guidance for stakeholders.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" id="demo-link" href="#">View Demo Launch Guide</a>
+              <a class="button button-secondary" id="deck-link" href="#">Download Slide Deck</a>
+              <a class="button button-secondary" id="repo-link" href="#">View GitHub Repo</a>
+            </div>
+            <div class="hero-note" id="demo-status"></div>
+          </div>
+
+          <aside class="hero-panel">
+            <span class="panel-tag">What the demo includes</span>
+            <h2>One product, one workflow, one decision story</h2>
+            <p>
+              The live demo shows a complete planning loop: AI task generation, dependency
+              validation, Monte Carlo forecasting, advisory ML scoring, scenario comparison, and
+              exportable stakeholder outputs.
+            </p>
+            <div class="tab-grid">
+              <div class="tab-chip">Executive Brief</div>
+              <div class="tab-chip">Task Plan</div>
+              <div class="tab-chip">Workflow</div>
+              <div class="tab-chip">Risk Dashboard</div>
+              <div class="tab-chip">ML Risk Scoring</div>
+              <div class="tab-chip">Scenario Lab</div>
+              <div class="tab-chip">History &amp; Export</div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section" id="problem">
+        <div class="shell">
+          <div class="section-header">
+            <h2>The problem is not planning speed. It is commitment quality.</h2>
+            <p>
+              Teams still commit to single-date project plans without modeling uncertainty. That
+              creates late schedule surprises, weak mitigation decisions, and stakeholder updates
+              that rely more on intuition than evidence.
+            </p>
+          </div>
+
+          <div class="metrics-grid">
+            <article class="metric-card">
+              <div class="label">Business Question</div>
+              <div class="value">1</div>
+              <p>Can teams go from a short project brief to a defensible, risk-aware commitment in one planning session?</p>
+            </article>
+            <article class="metric-card">
+              <div class="label">Dataset Rows</div>
+              <div class="value">1300</div>
+              <p>Construction-task rows used for the advisory ML benchmark and model comparison.</p>
+            </article>
+            <article class="metric-card">
+              <div class="label">Models Benchmarked</div>
+              <div class="value">4</div>
+              <p>Logistic Regression, Random Forest, Extra Trees, and HistGradientBoosting.</p>
+            </article>
+            <article class="metric-card">
+              <div class="label">Automated Tests</div>
+              <div class="value">24</div>
+              <p>Green test suite plus smoke test to protect the capstone demo path.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="solution">
+        <div class="shell">
+          <div class="section-header">
+            <h2>What certAIn Project Intelligence does</h2>
+            <p>
+              The product combines LLM-assisted planning, schedule-risk simulation, and scenario
+              recommendation in one stakeholder-facing workflow. The objective is not to replace
+              PM tools; it is to improve confidence before commitment.
+            </p>
+          </div>
+
+          <div class="flow-grid">
+            <article class="flow-card">
+              <div class="flow-index">1</div>
+              <h3>Generate</h3>
+              <p>Convert a project brief into a structured task plan with a resilient mock fallback.</p>
+            </article>
+            <article class="flow-card">
+              <div class="flow-index">2</div>
+              <h3>Validate</h3>
+              <p>Apply schema and DAG checks so malformed or cyclic plans never reach the forecast engine.</p>
+            </article>
+            <article class="flow-card">
+              <div class="flow-index">3</div>
+              <h3>Forecast</h3>
+              <p>Run dynamic critical-path Monte Carlo simulations to estimate mean, P50, P80, and delay probability.</p>
+            </article>
+            <article class="flow-card">
+              <div class="flow-index">4</div>
+              <h3>Diagnose</h3>
+              <p>Rank delay drivers by critical-path frequency so mitigation effort goes to the real bottlenecks.</p>
+            </article>
+            <article class="flow-card">
+              <div class="flow-index">5</div>
+              <h3>Compare</h3>
+              <p>Evaluate baseline, aggressive deadline, and increased-capacity scenarios in one decision view.</p>
+            </article>
+            <article class="flow-card">
+              <div class="flow-index">6</div>
+              <h3>Explain</h3>
+              <p>Surface an executive summary and advisory ML signal without pretending the classifier replaces the simulation.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="evidence">
+        <div class="shell">
+          <div class="section-header">
+            <h2>Evidence package</h2>
+            <p>
+              The repository ships with reviewer-facing artifacts so the project can be understood
+              without opening the code first: business framing, EDA, model comparison, validation
+              notes, and the final deck.
+            </p>
+          </div>
+
+          <div class="split-grid">
+            <article class="panel">
+              <h3>Data and modeling summary</h3>
+              <ul>
+                <li>0 missing values, 0 duplicate rows, 0 duplicate task IDs.</li>
+                <li>Target class split: Low 50.8%, Medium 29.0%, High 20.2%.</li>
+                <li>Selected advisory model: HistGradientBoosting.</li>
+                <li>Selection rule: highest cross-validated macro F1, not raw accuracy.</li>
+              </ul>
+            </article>
+
+            <article class="panel">
+              <h3>Why the ML model is advisory only</h3>
+              <ul>
+                <li>The dataset is clean, but class separation is weak.</li>
+                <li>Raw accuracy overstates performance because the target is imbalanced.</li>
+                <li>Monte Carlo remains the primary forecasting engine.</li>
+                <li>ML adds task-level directional risk context, not commitment certainty.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="deliverables">
+        <div class="shell">
+          <div class="section-header">
+            <h2>Presentation-ready deliverables</h2>
+            <p>
+              This project is packaged to support both a formal capstone presentation and a
+              polished demo flow that can be shared publicly after the bootcamp.
+            </p>
+          </div>
+
+          <div class="deliverables-grid">
+            <article class="deliverable-card">
+              <h3>Public case-study page</h3>
+              <p>
+                This showcase page explains the problem, product, technical approach, and evidence
+                in a format suited for portfolio review.
+              </p>
+            </article>
+
+            <article class="deliverable-card">
+              <h3>Live demo app</h3>
+              <p>
+                The Streamlit app is ready for deployment and already supports a resilient `mock`
+                mode for high-stakes presentations.
+              </p>
+            </article>
+
+            <article class="deliverable-card">
+              <h3>Submission bundle</h3>
+              <ul>
+                <li>Final slide deck</li>
+                <li>GitHub repository</li>
+                <li>EDA and model comparison docs</li>
+                <li>Smoke-tested demo workflow</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="hero-actions" style="margin-top: 1.4rem;">
+            <a class="button button-primary" id="repo-link-secondary" href="#">Open Repository</a>
+            <a class="button button-secondary" id="evidence-link" href="#">View Deliverables Map</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="shell footer-bar">
+        <div><strong data-brand></strong> | <span data-app-title></span></div>
+        <div>&copy; <span id="year"></span> Capstone showcase package</div>
+      </div>
+    </footer>
+  </body>
+</html>

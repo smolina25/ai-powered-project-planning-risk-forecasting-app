@@ -54,7 +54,7 @@ class Settings:
         "RISK_MODEL_METRICS_PATH",
         "models/risk_model_metrics.json",
     ).strip()
-    risk_model_version: str = os.getenv("RISK_MODEL_VERSION", "v0-advisory").strip()
+    risk_model_version: str = os.getenv("RISK_MODEL_VERSION", "v1-advisory-multimodel").strip()
 
     def validate(self) -> None:
         if self.app_mode not in {"real", "mock"}:

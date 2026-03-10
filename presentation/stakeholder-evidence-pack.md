@@ -1,9 +1,10 @@
 # Stakeholder Evidence Pack
 
 ## 1) Deployment Proof
-- Primary app URL: `<add-streamlit-cloud-url>`
+- Primary app URL: not committed in this repository snapshot; deploy via the `README.md` Streamlit instructions when a public URL is needed
 - Backup run method: `docker compose up --build`
-- Build date: `<yyyy-mm-dd>`
+- Build date: `2026-03-09`
+- Public case-study page source: `web/showcase/index.html`
 
 ## 2) Technical Proof Points
 - App entrypoint: `app.py`
@@ -24,14 +25,19 @@
 - Training script: `scripts/train_risk_model.py`
 - Model artifact: `models/risk_classifier.joblib`
 - Metadata: `models/risk_model_metrics.json`
-- Version field: `RISK_MODEL_VERSION`
+- Comparison report: `docs/model-comparison.md`
+- Version field: `RISK_MODEL_VERSION=v1-advisory-multimodel`
 - Positioning: advisory signal, not sole decision engine
 
 ## 5) Demonstration Evidence
 - Script: `presentation/demo-script.md`
-- Deck: `presentation/stakeholder-deck.md`
+- Deck: `presentation/powerpoint-ready-deck.md`
+- Final deck export: `presentation/certAIn-Project-Intelligence-Capstone.pptx`
 - Q&A playbook: `presentation/post-presentation-qa-playbook.md`
 - Backup flow: `presentation/backup-demo.md`
+- Business framing: `docs/capstone-business-questions.md`
+- EDA summary: `docs/technical-eda-summary.md`
+- Deliverables map: `docs/capstone-deliverables-map.md`
 
 ## 6) Known Limitations (Transparent)
 - LLM quality depends on input prompt quality.

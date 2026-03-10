@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>certAIn Project Intelligence | Platform Prototype</title>
+    <meta
+      name="description"
+      content="A polished product prototype for the certAIn Project Intelligence capstone."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Syne:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="ambient ambient-c"></div>
+
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark">cA</div>
+          <div>
+            <p class="eyebrow">certAIn Project Intelligence</p>
+            <h1>Forecast-first planning</h1>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <a href="#composer" class="nav-item active">Command Center</a>
+          <a href="#forecast" class="nav-item">Forecast Engine</a>
+          <a href="#critical-path" class="nav-item">Critical Path</a>
+          <a href="#scenario-lab" class="nav-item">Scenario Lab</a>
+          <a href="#evidence-pack" class="nav-item">Evidence Pack</a>
+        </nav>
+
+        <section class="sidebar-panel">
+          <p class="panel-label">Product Story</p>
+          <p class="panel-copy">
+            AI-Powered Project Planning &amp; Risk Forecasting App with workflow
+            reasoning, Monte Carlo forecasting, and stakeholder-ready decision
+            support.
+          </p>
+        </section>
+
+        <section class="sidebar-panel compact">
+          <p class="panel-label">Demo Stack</p>
+          <div class="stack-list">
+            <span>Groq planning</span>
+            <span>Monte Carlo</span>
+            <span>ML advisory signal</span>
+            <span>Scenario comparison</span>
+          </div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Interactive product concept</p>
+            <h2>Mission control for risky delivery decisions</h2>
+          </div>
+          <div class="topbar-actions">
+            <span class="status-pill" id="mode-pill">Mock advisory mode</span>
+            <button class="ghost-button" id="mode-toggle" type="button">
+              Switch to live story
+            </button>
+          </div>
+        </header>
+
+        <section class="hero-card reveal">
+          <div class="hero-copy">
+            <p class="eyebrow">Brand</p>
+            <h3>certAIn Project Intelligence</h3>
+            <p>
+              Turn a project brief into a defensible plan, a quantified forecast,
+              and an action-ready scenario recommendation in one working session.
+            </p>
+          </div>
+          <div class="hero-metrics">
+            <div class="hero-stat">
+              <span class="stat-label">Decision cycle</span>
+              <strong>&lt; 15 min</strong>
+            </div>
+            <div class="hero-stat">
+              <span class="stat-label">Forecast outputs</span>
+              <strong>P50 / P80 / Risk</strong>
+            </div>
+            <div class="hero-stat">
+              <span class="stat-label">Demo posture</span>
+              <strong>Exec + PM + DS</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <article class="card composer-card reveal" id="composer">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">01</p>
+                <h3>Project brief composer</h3>
+              </div>
+              <span class="chip">AI intake</span>
+            </div>
+
+            <label class="field-label" for="sample-select">Demo scenario</label>
+            <select id="sample-select" class="select-field"></select>
+
+            <label class="field-label" for="brief-input">Project description</label>
+            <textarea id="brief-input" rows="7"></textarea>
+
+            <div class="composer-actions">
+              <button class="primary-button" id="generate-button" type="button">
+                Generate forecast story
+              </button>
+              <button class="ghost-button" id="shuffle-button" type="button">
+                Load another brief
+              </button>
+            </div>
+
+            <div class="signal-strip">
+              <div>
+                <span class="strip-label">Planning status</span>
+                <strong id="generation-status">Ready to simulate</strong>
+              </div>
+              <div>
+                <span class="strip-label">Selected motion</span>
+                <strong id="selected-motion">Baseline commitment</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="card executive-card reveal" id="forecast">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">02</p>
+                <h3>Executive forecast</h3>
+              </div>
+              <span class="chip warning" id="risk-chip">Risk watch</span>
+            </div>
+
+            <div class="metrics-grid">
+              <div class="metric-tile">
+                <span class="metric-label">Delay probability</span>
+                <strong class="metric-value" id="delay-prob">38%</strong>
+              </div>
+              <div class="metric-tile">
+                <span class="metric-label">P80 commitment</span>
+                <strong class="metric-value" id="p80-value">94 days</strong>
+              </div>
+              <div class="metric-tile">
+                <span class="metric-label">Forecast confidence</span>
+                <strong class="metric-value" id="confidence-value">81%</strong>
+              </div>
+              <div class="metric-tile">
+                <span class="metric-label">Primary delay driver</span>
+                <strong class="metric-value small" id="driver-value"
+                  >Integration hardening</strong
+                >
+              </div>
+            </div>
+
+            <div class="executive-brief">
+              <p class="field-label">Narrative</p>
+              <p id="executive-brief-copy">
+                The current plan is viable but exposed. The highest-value action is
+                to de-risk integration hardening before committing the launch date.
+              </p>
+            </div>
+
+            <div class="forecast-ribbon">
+              <span>Mean <strong id="mean-value">87d</strong></span>
+              <span>P50 <strong id="p50-value">83d</strong></span>
+              <span>P80 <strong id="p80-ribbon">94d</strong></span>
+              <span>Deadline <strong id="deadline-value">90d</strong></span>
+            </div>
+          </article>
+
+          <article class="card distribution-card reveal">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">03</p>
+                <h3>Forecast distribution</h3>
+              </div>
+              <span class="chip">Monte Carlo style</span>
+            </div>
+
+            <div class="distribution-chart" id="distribution-bars"></div>
+
+            <div class="legend-row">
+              <span><i class="legend-dot teal"></i> P50 anchor</span>
+              <span><i class="legend-dot coral"></i> P80 anchor</span>
+              <span><i class="legend-dot gold"></i> Deadline</span>
+            </div>
+          </article>
+
+          <article class="card path-card reveal" id="critical-path">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">04</p>
+                <h3>Critical path view</h3>
+              </div>
+              <span class="chip">Workflow reasoning</span>
+            </div>
+
+            <div class="task-list" id="critical-task-list"></div>
+          </article>
+
+          <article class="card scenario-card reveal" id="scenario-lab">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">05</p>
+                <h3>Scenario lab</h3>
+              </div>
+              <span class="chip success">Decision support</span>
+            </div>
+
+            <div class="scenario-switches">
+              <button class="scenario-button active" data-scenario="baseline" type="button">
+                Baseline
+              </button>
+              <button class="scenario-button" data-scenario="mitigate" type="button">
+                Mitigate risk
+              </button>
+              <button class="scenario-button" data-scenario="accelerate" type="button">
+                Accelerate
+              </button>
+            </div>
+
+            <div class="scenario-summary">
+              <h4 id="scenario-title">Baseline commitment</h4>
+              <p id="scenario-summary-copy">
+                Keep scope stable and absorb risk with a safer commitment window.
+              </p>
+            </div>
+
+            <div class="scenario-table" id="scenario-table"></div>
+          </article>
+
+          <article class="card signal-card reveal">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">06</p>
+                <h3>Task-level advisory signals</h3>
+              </div>
+              <span class="chip">ML overlay</span>
+            </div>
+
+            <div class="signal-grid" id="signal-grid"></div>
+          </article>
+
+          <article class="card evidence-card reveal" id="evidence-pack">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">07</p>
+                <h3>Coach-facing evidence pack</h3>
+              </div>
+              <span class="chip">Submission ready</span>
+            </div>
+
+            <div class="evidence-links">
+              <a href="../../docs/capstone-business-questions.md">Business questions</a>
+              <a href="../../docs/technical-eda-summary.md">Technical EDA</a>
+              <a href="../../docs/model-comparison.md">Model comparison</a>
+              <a href="../../docs/capstone-deliverables-map.md">Deliverables map</a>
+              <a href="../../presentation/certAIn-Project-Intelligence-Capstone.pptx"
+                >Capstone deck</a
+              >
+              <a href="../showcase/index.html">Public showcase</a>
+            </div>
+          </article>
+
+          <article class="card feed-card reveal">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">08</p>
+                <h3>Stakeholder rhythm</h3>
+              </div>
+              <span class="chip">Narrative cues</span>
+            </div>
+
+            <div class="feed-list" id="decision-feed"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>
