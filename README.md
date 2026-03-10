@@ -1,4 +1,6 @@
-# AI-Powered Project Planning & Risk Forecasting App
+# certAIn Project Intelligence
+
+AI-Powered Project Planning & Risk Forecasting App
 
 A stakeholder-ready Streamlit application that generates project plans with Groq, builds dependency workflows, runs Monte Carlo forecasting, highlights delay drivers, compares execution scenarios, and stores session history in SQLite.
 
@@ -29,8 +31,29 @@ A stakeholder-ready Streamlit application that generates project plans with Groq
 ai-powered-project-planning-risk-forecasting-app/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml
+│       ├── ci.yml
+│       └── pages.yml
 ├── app.py
+├── docs/
+│   ├── capstone-business-questions.md
+│   ├── technical-eda-summary.md
+│   ├── model-comparison.md
+│   ├── capstone-deliverables-map.md
+│   ├── mvp-test-synthesis.md
+│   ├── public-demo-launch.md
+│   ├── project-work-log.md
+│   └── website-build-guides/
+├── web/
+│   ├── showcase/
+│   ├── platform-prototype/
+│   ├── lovable-style-site/
+│   └── website-versions/
+├── planning/
+│   └── aipm-product-discovery-planning/
+├── Notebooks/
+│   ├── ai-planning-risk-app-02.ipynb
+│   ├── ai-planning-risk-app-03.ipynb
+│   └── website-versions/
 ├── PROJECT_WORKFLOW.md
 ├── requirements.txt
 ├── requirements-dev.txt
@@ -51,7 +74,6 @@ ai-powered-project-planning-risk-forecasting-app/
 │   ├── test_ml_service.py
 │   └── test_storage_ml_predictions.py
 ├── presentation/
-│   ├── stakeholder-deck.md
 │   ├── demo-script.md
 │   ├── backup-demo.md
 │   └── powerpoint-ready-deck.md
@@ -134,7 +156,7 @@ SQLITE_DB_PATH=data/app.db
 RISK_MODEL_ENABLED=true
 RISK_MODEL_PATH=models/risk_classifier.joblib
 RISK_MODEL_METRICS_PATH=models/risk_model_metrics.json
-RISK_MODEL_VERSION=v0-advisory
+RISK_MODEL_VERSION=v1-advisory-multimodel
 ```
 
 Notes:
@@ -165,14 +187,16 @@ Run smoke test before demos:
 python scripts/smoke_test.py
 ```
 
-Train/update model artifacts:
+Train/update model artifacts and benchmark the candidate classifiers:
 ```bash
 python scripts/train_risk_model.py \
   --dataset data/construction_dataset.csv \
   --model-out models/risk_classifier.joblib \
   --metrics-out models/risk_model_metrics.json \
-  --model-version v0-advisory
+  --model-version v1-advisory-multimodel
 ```
+
+The training run now compares `LogisticRegression`, `RandomForest`, `ExtraTrees`, and `HistGradientBoosting`, then selects the advisory model by cross-validated macro F1.
 
 ## Deployment
 
@@ -195,14 +219,53 @@ docker compose up --build
 
 Docker is not required for Streamlit Cloud deployment, but included for production-readiness and local parity.
 
+## Public Showcase
+The repository includes a branded public-facing case-study microsite in `web/showcase/`.
+
+Preview locally:
+```bash
+python -m http.server 8000
+```
+
+Then open:
+- `http://localhost:8000/web/showcase/`
+
+After you deploy the Streamlit app, update `web/showcase/config.js` with the live demo URL. The deployment steps are documented in `docs/public-demo-launch.md`.
+
+## Website Versions
+Website variants are intentionally kept separate for presentation history:
+
+- `web/website-versions/` - index page for all website variants
+- `web/showcase/` - public case-study microsite (`v1`)
+- `web/platform-prototype/` - product concept prototype (`v2`)
+- `web/lovable-style-site/` - Lovable-style multi-page marketing site (`v3`)
+
+Open the catalog locally at:
+```bash
+http://localhost:8000/web/website-versions/
+```
+
+## Planning Workspace
+The original product-management planning workspace is preserved under `planning/` so it no longer competes with final deliverables at the repo root:
+
+- `planning/aipm-product-discovery-planning/`
+
 ## Presentation Assets
 Use the materials in `presentation/`:
-- `stakeholder-deck.md` (10-slide narrative)
 - `demo-script.md` (5-7 minute live flow)
 - `backup-demo.md` (mock-mode contingency)
 - `powerpoint-ready-deck.md` (12-slide, PowerPoint-ready structure)
+- `certAIn-Project-Intelligence-Capstone.pptx` (final branded slide deck)
 - `post-presentation-qa-playbook.md` (rapid Q&A answer sheet)
 - `stakeholder-evidence-pack.md` (proof bundle for deployment, testing, and limits)
+
+## Capstone Evidence
+Use the coach-facing materials in `docs/`:
+- `capstone-deliverables-map.md` maps each required deliverable to repository evidence
+- `capstone-business-questions.md` states the business framing, impact, and value proposition
+- `technical-eda-summary.md` summarizes data quality, class balance, and modeling implications
+- `model-comparison.md` documents the candidate models, metrics, and selected advisory model
+- `mvp-test-synthesis.md` packages internal validation notes and the external-session template
 
 ## Team Workflow Asset
 - `PROJECT_WORKFLOW.md` includes:

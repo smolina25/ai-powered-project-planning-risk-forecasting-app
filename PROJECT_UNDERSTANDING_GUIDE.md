@@ -4,7 +4,7 @@ This document is for team understanding and handover readiness.
 It explains what the app does, how data flows, where each logic lives, and how to debug quickly.
 
 ## 1) What This Project Is
-ProjectSense AI is a planning-risk decision support app.
+certAIn Project Intelligence is a planning-risk decision support app.
 Given a project description, it:
 - generates a structured task plan,
 - validates task/dependency quality,

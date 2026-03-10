@@ -34,9 +34,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
-logger = logging.getLogger("projectsense.app")
+logger = logging.getLogger("certain_project_intelligence.app")
 
-st.set_page_config(page_title="AI Powered Planning & Risk Forecasting App", layout="wide")
+st.set_page_config(page_title="certAIn Project Intelligence", layout="wide")
 
 
 @st.cache_resource
@@ -96,6 +96,20 @@ def _inject_styles() -> None:
             border-radius: 16px;
             padding: 1rem 1.2rem;
             margin-bottom: 1rem;
+        }
+
+        .hero-kicker {
+            display: inline-block;
+            margin-bottom: 0.55rem;
+            padding: 0.28rem 0.6rem;
+            border-radius: 999px;
+            border: 1px solid #99f6e4;
+            background: rgba(13, 148, 136, 0.08);
+            color: #115e59;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
 
         .hero-title {
@@ -358,7 +372,8 @@ except Exception as exc:  # noqa: BLE001
 st.markdown(
     """
     <div class="hero-wrap">
-      <div class="hero-title">AI Powered Project Planning & Risk Forecasting App</div>
+      <div class="hero-kicker">certAIn Project Intelligence</div>
+      <div class="hero-title">AI-Powered Project Planning & Risk Forecasting App</div>
       <p class="hero-subtitle">
         AI-assisted project planning with workflow reasoning, Monte Carlo risk forecasting,
         and scenario decision support.
@@ -837,7 +852,7 @@ with tab_history:
         st.download_button(
             "Download Full Run JSON",
             data=json.dumps(export_json, indent=2).encode("utf-8"),
-            file_name="projectsense_run.json",
+            file_name="certain_project_intelligence_run.json",
             mime="application/json",
         )
     else:

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>certAIn | Monte Carlo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-page="monte-carlo">
+    <canvas class="starfield" id="starfield" aria-hidden="true"></canvas>
+    <div class="backdrop-glow glow-a"></div>
+    <div class="backdrop-glow glow-b"></div>
+    <div class="js-site-header"></div>
+    <main>
+      <section class="page-hero page-block">
+        <div>
+          <span class="section-kicker">Monte Carlo</span>
+          <h1>Replace one date with a defensible range.</h1>
+          <p>
+            Run repeated simulations to estimate completion distributions, surface
+            P50 and P80 commitments, and identify how deadline risk changes under
+            different scenarios.
+          </p>
+        </div>
+        <div class="page-hero-panel">
+          <div class="section-title">Forecast anchors</div>
+          <div class="data-row"><span>P50 commitment</span><strong>March 15</strong></div>
+          <div class="data-row"><span>P80 commitment</span><strong>March 22</strong></div>
+          <div class="data-row"><span>Delay probability</span><strong>38%</strong></div>
+          <div class="data-row"><span>Main driver</span><strong>API integration</strong></div>
+        </div>
+      </section>
+
+      <section class="page-block">
+        <div class="bar-chart">
+          <span style="height: 20%"></span>
+          <span style="height: 28%"></span>
+          <span style="height: 42%"></span>
+          <span style="height: 56%"></span>
+          <span style="height: 72%"></span>
+          <span style="height: 92%"></span>
+          <span style="height: 84%"></span>
+          <span style="height: 62%"></span>
+          <span style="height: 38%"></span>
+          <span style="height: 18%"></span>
+        </div>
+      </section>
+
+      <section class="comparison-grid page-block">
+        <article class="comparison-card">
+          <h3>P50</h3>
+          <p>The most likely commitment point when normal delivery conditions hold.</p>
+        </article>
+        <article class="comparison-card">
+          <h3>P80</h3>
+          <p>A safer promise for executive communication when teams want higher certainty.</p>
+        </article>
+        <article class="comparison-card">
+          <h3>Delay drivers</h3>
+          <p>Critical-path frequency explains which tasks deserve mitigation before launch.</p>
+        </article>
+      </section>
+    </main>
+    <div class="js-site-footer"></div>
+    <script src="./main.js"></script>
+  </body>
+</html>
