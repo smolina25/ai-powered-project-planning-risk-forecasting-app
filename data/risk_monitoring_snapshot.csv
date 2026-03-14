@@ -1,0 +1,271 @@
+Snapshot_Month,Project_ID,Portfolio_Segment,Model_Version,Predicted_Risk_Level,Actual_Risk_Level,Prediction_Confidence,P80_Forecast_Days,Actual_Completion_Days,Absolute_Forecast_Error_Days,Drift_Score,Alerts_Open
+2025-07-01,P013,Industrial,v1-advisory-multimodel,Low,Low,0.795,314,308,6,0.321,0
+2025-07-01,P034,Public Sector,v1-advisory-multimodel,Low,Low,0.705,298,260,38,0.407,0
+2025-07-01,P064,Energy,v1-advisory-multimodel,Low,Low,0.533,293,288,5,0.412,0
+2025-07-01,P066,Infrastructure,v1-advisory-multimodel,Low,Low,0.686,289,274,15,0.358,0
+2025-07-01,P069,Industrial,v1-advisory-multimodel,Low,Low,0.637,260,249,11,0.467,0
+2025-07-01,P094,Public Sector,v1-advisory-multimodel,High,High,0.731,356,353,3,0.526,0
+2025-07-01,P120,Industrial,v1-advisory-multimodel,Low,Low,0.803,239,200,39,0.343,0
+2025-07-01,P125,Energy,v1-advisory-multimodel,Medium,Medium,0.551,262,245,17,0.242,0
+2025-07-01,P141,Public Sector,v1-advisory-multimodel,Low,Low,0.853,290,281,9,0.402,0
+2025-07-01,P156,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.506,315,303,12,0.425,0
+2025-07-01,P186,Industrial,v1-advisory-multimodel,High,Medium,0.492,313,306,7,0.384,0
+2025-07-01,P194,Energy,v1-advisory-multimodel,Low,Medium,0.447,360,347,13,0.496,0
+2025-07-01,P195,Industrial,v1-advisory-multimodel,Low,Low,0.496,268,264,4,0.294,0
+2025-07-01,P220,Public Sector,v1-advisory-multimodel,Low,Low,0.767,282,281,1,0.409,0
+2025-07-01,P226,Public Sector,v1-advisory-multimodel,Low,Low,0.592,318,308,10,0.303,0
+2025-07-01,P229,Infrastructure,v1-advisory-multimodel,Low,Low,0.551,264,245,19,0.365,0
+2025-07-01,P233,Commercial,v1-advisory-multimodel,Low,Low,0.734,249,246,3,0.303,0
+2025-07-01,P249,Energy,v1-advisory-multimodel,Low,Low,0.618,261,254,7,0.456,0
+2025-07-01,P250,Industrial,v1-advisory-multimodel,Low,Medium,0.766,339,309,30,0.409,0
+2025-07-01,P255,Energy,v1-advisory-multimodel,Medium,Medium,0.604,302,291,11,0.423,0
+2025-07-01,P284,Commercial,v1-advisory-multimodel,High,High,0.499,397,390,7,0.316,0
+2025-07-01,P292,Energy,v1-advisory-multimodel,High,High,0.717,374,376,2,0.465,0
+2025-07-01,P301,Industrial,v1-advisory-multimodel,Low,Low,0.573,340,329,11,0.411,0
+2025-07-01,P311,Industrial,v1-advisory-multimodel,Medium,Medium,0.73,342,337,5,0.415,0
+2025-07-01,P313,Industrial,v1-advisory-multimodel,High,High,0.625,396,391,5,0.445,0
+2025-07-01,P318,Commercial,v1-advisory-multimodel,Medium,Low,0.483,241,212,29,0.3,0
+2025-07-01,P327,Commercial,v1-advisory-multimodel,Low,Low,0.4,186,149,37,0.432,0
+2025-07-01,P359,Industrial,v1-advisory-multimodel,Low,Low,0.706,338,324,14,0.385,0
+2025-08-01,P001,Public Sector,v1-advisory-multimodel,Low,Low,0.668,317,296,21,0.275,0
+2025-08-01,P003,Commercial,v1-advisory-multimodel,Medium,Medium,0.624,312,304,8,0.361,0
+2025-08-01,P006,Energy,v1-advisory-multimodel,Medium,Medium,0.624,304,296,8,0.383,0
+2025-08-01,P012,Infrastructure,v1-advisory-multimodel,Low,Low,0.532,322,313,9,0.379,0
+2025-08-01,P031,Public Sector,v1-advisory-multimodel,Low,Low,0.862,246,246,0,0.312,0
+2025-08-01,P091,Public Sector,v1-advisory-multimodel,High,High,0.746,371,356,15,0.568,3
+2025-08-01,P093,Energy,v1-advisory-multimodel,Medium,Medium,0.776,263,254,9,0.42,0
+2025-08-01,P099,Energy,v1-advisory-multimodel,High,High,0.507,353,349,4,0.466,0
+2025-08-01,P101,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.584,368,351,17,0.4,0
+2025-08-01,P105,Energy,v1-advisory-multimodel,Medium,Medium,0.788,335,320,15,0.396,0
+2025-08-01,P115,Industrial,v1-advisory-multimodel,Low,Low,0.618,282,275,7,0.33,0
+2025-08-01,P126,Energy,v1-advisory-multimodel,Medium,Medium,0.681,351,332,19,0.308,0
+2025-08-01,P127,Infrastructure,v1-advisory-multimodel,Low,Low,0.571,317,271,46,0.332,0
+2025-08-01,P138,Commercial,v1-advisory-multimodel,Low,Low,0.483,230,215,15,0.307,0
+2025-08-01,P159,Commercial,v1-advisory-multimodel,Low,Medium,0.638,205,186,19,0.401,0
+2025-08-01,P183,Industrial,v1-advisory-multimodel,Medium,Low,0.679,255,200,55,0.313,0
+2025-08-01,P197,Infrastructure,v1-advisory-multimodel,Low,Low,0.786,314,279,35,0.303,0
+2025-08-01,P200,Energy,v1-advisory-multimodel,Low,Low,0.516,267,206,61,0.273,0
+2025-08-01,P201,Energy,v1-advisory-multimodel,Low,Low,0.827,264,254,10,0.343,0
+2025-08-01,P212,Commercial,v1-advisory-multimodel,Medium,Medium,0.554,226,199,27,0.421,0
+2025-08-01,P216,Public Sector,v1-advisory-multimodel,Low,Medium,0.818,301,301,0,0.288,0
+2025-08-01,P225,Industrial,v1-advisory-multimodel,Medium,Medium,0.454,294,293,1,0.56,1
+2025-08-01,P239,Infrastructure,v1-advisory-multimodel,Low,Low,0.757,332,325,7,0.381,0
+2025-08-01,P267,Commercial,v1-advisory-multimodel,Low,Low,0.849,283,232,51,0.397,0
+2025-08-01,P272,Industrial,v1-advisory-multimodel,Medium,Low,0.556,323,315,8,0.355,0
+2025-08-01,P283,Infrastructure,v1-advisory-multimodel,High,High,0.55,351,350,1,0.474,0
+2025-08-01,P295,Energy,v1-advisory-multimodel,High,Medium,0.603,392,389,3,0.363,0
+2025-08-01,P296,Infrastructure,v1-advisory-multimodel,Low,Low,0.544,296,291,5,0.337,0
+2025-08-01,P298,Energy,v1-advisory-multimodel,Medium,Medium,0.589,351,347,4,0.49,0
+2025-08-01,P302,Energy,v1-advisory-multimodel,Low,Low,0.528,316,298,18,0.23,0
+2025-08-01,P305,Commercial,v1-advisory-multimodel,Low,Low,0.696,254,235,19,0.239,0
+2025-08-01,P323,Commercial,v1-advisory-multimodel,Low,Low,0.652,261,255,6,0.418,0
+2025-08-01,P335,Public Sector,v1-advisory-multimodel,Medium,Medium,0.587,375,366,9,0.342,0
+2025-08-01,P336,Public Sector,v1-advisory-multimodel,Medium,Medium,0.776,267,249,18,0.359,0
+2025-09-01,P028,Public Sector,v1-advisory-multimodel,Medium,Low,0.833,296,290,6,0.32,0
+2025-09-01,P033,Energy,v1-advisory-multimodel,Medium,Medium,0.789,255,253,2,0.47,0
+2025-09-01,P068,Energy,v1-advisory-multimodel,Low,Low,0.532,290,277,13,0.337,0
+2025-09-01,P084,Infrastructure,v1-advisory-multimodel,Low,Low,0.726,336,312,24,0.299,0
+2025-09-01,P090,Commercial,v1-advisory-multimodel,High,High,0.582,325,320,5,0.316,0
+2025-09-01,P096,Industrial,v1-advisory-multimodel,Low,Low,0.63,279,216,63,0.361,0
+2025-09-01,P098,Industrial,v1-advisory-multimodel,Low,Low,0.545,308,299,9,0.448,0
+2025-09-01,P104,Commercial,v1-advisory-multimodel,Medium,Medium,0.637,322,315,7,0.503,0
+2025-09-01,P110,Industrial,v1-advisory-multimodel,Low,Low,0.742,251,208,43,0.294,0
+2025-09-01,P133,Energy,v1-advisory-multimodel,Low,Low,0.562,284,272,12,0.409,0
+2025-09-01,P143,Commercial,v1-advisory-multimodel,Medium,Medium,0.647,253,229,24,0.491,0
+2025-09-01,P149,Commercial,v1-advisory-multimodel,Low,Low,0.671,256,250,6,0.356,0
+2025-09-01,P177,Industrial,v1-advisory-multimodel,Low,Low,0.794,320,309,11,0.491,0
+2025-09-01,P181,Public Sector,v1-advisory-multimodel,Low,Low,0.732,286,281,5,0.401,0
+2025-09-01,P203,Energy,v1-advisory-multimodel,Low,Low,0.722,299,277,22,0.228,0
+2025-09-01,P207,Commercial,v1-advisory-multimodel,Medium,Medium,0.579,261,254,7,0.526,0
+2025-09-01,P211,Infrastructure,v1-advisory-multimodel,Low,Medium,0.444,283,273,10,0.452,0
+2025-09-01,P228,Industrial,v1-advisory-multimodel,Low,Low,0.588,303,297,6,0.492,0
+2025-09-01,P234,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.742,273,261,12,0.394,0
+2025-09-01,P262,Industrial,v1-advisory-multimodel,Low,Low,0.47,330,313,17,0.36,0
+2025-09-01,P263,Industrial,v1-advisory-multimodel,Low,Low,0.732,317,313,4,0.411,0
+2025-09-01,P287,Commercial,v1-advisory-multimodel,Medium,Low,0.477,300,290,10,0.412,0
+2025-09-01,P328,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.738,344,335,9,0.516,0
+2025-09-01,P353,Commercial,v1-advisory-multimodel,Medium,Medium,0.449,282,270,12,0.386,0
+2025-10-01,P025,Commercial,v1-advisory-multimodel,Low,Low,0.547,295,275,20,0.37,0
+2025-10-01,P036,Energy,v1-advisory-multimodel,Medium,Low,0.572,297,282,15,0.326,0
+2025-10-01,P052,Commercial,v1-advisory-multimodel,Low,Low,0.87,243,235,8,0.287,0
+2025-10-01,P071,Energy,v1-advisory-multimodel,Low,Low,0.646,288,240,48,0.319,0
+2025-10-01,P074,Public Sector,v1-advisory-multimodel,Medium,Low,0.581,267,260,7,0.363,0
+2025-10-01,P079,Energy,v1-advisory-multimodel,Medium,Medium,0.635,302,296,6,0.43,0
+2025-10-01,P085,Public Sector,v1-advisory-multimodel,Low,Low,0.852,294,256,38,0.347,0
+2025-10-01,P087,Infrastructure,v1-advisory-multimodel,Low,Low,0.821,350,349,1,0.387,0
+2025-10-01,P147,Infrastructure,v1-advisory-multimodel,High,Medium,0.59,293,289,4,0.431,0
+2025-10-01,P153,Commercial,v1-advisory-multimodel,Low,Low,0.556,278,241,37,0.214,0
+2025-10-01,P155,Commercial,v1-advisory-multimodel,Low,Low,0.594,287,251,36,0.29,0
+2025-10-01,P166,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.792,327,311,16,0.4,0
+2025-10-01,P174,Infrastructure,v1-advisory-multimodel,Low,Medium,0.492,373,363,10,0.493,0
+2025-10-01,P176,Infrastructure,v1-advisory-multimodel,Low,Low,0.722,265,262,3,0.414,0
+2025-10-01,P179,Commercial,v1-advisory-multimodel,Low,Low,0.819,249,233,16,0.517,0
+2025-10-01,P182,Public Sector,v1-advisory-multimodel,Low,Low,0.576,307,296,11,0.353,0
+2025-10-01,P185,Commercial,v1-advisory-multimodel,Medium,Medium,0.636,289,274,15,0.48,0
+2025-10-01,P205,Public Sector,v1-advisory-multimodel,Low,Medium,0.547,394,375,19,0.373,0
+2025-10-01,P251,Commercial,v1-advisory-multimodel,Low,Low,0.869,316,312,4,0.326,0
+2025-10-01,P288,Commercial,v1-advisory-multimodel,Low,Low,0.844,252,242,10,0.431,0
+2025-10-01,P297,Energy,v1-advisory-multimodel,Medium,Low,0.826,316,297,19,0.352,0
+2025-10-01,P299,Energy,v1-advisory-multimodel,Low,Medium,0.521,321,316,5,0.445,0
+2025-10-01,P303,Commercial,v1-advisory-multimodel,Medium,Medium,0.486,197,178,19,0.33,0
+2025-10-01,P317,Infrastructure,v1-advisory-multimodel,Low,Low,0.595,259,255,4,0.427,0
+2025-10-01,P324,Industrial,v1-advisory-multimodel,Low,Low,0.608,272,260,12,0.253,0
+2025-10-01,P326,Commercial,v1-advisory-multimodel,Low,Low,0.761,278,209,69,0.343,0
+2025-10-01,P342,Public Sector,v1-advisory-multimodel,Low,Low,0.715,236,218,18,0.235,0
+2025-10-01,P343,Industrial,v1-advisory-multimodel,High,Medium,0.585,288,257,31,0.383,0
+2025-10-01,P344,Energy,v1-advisory-multimodel,Medium,Low,0.544,334,317,17,0.388,0
+2025-10-01,P348,Industrial,v1-advisory-multimodel,Low,Low,0.692,323,311,12,0.345,0
+2025-10-01,P352,Public Sector,v1-advisory-multimodel,Low,Low,0.687,319,288,31,0.361,0
+2025-11-01,P008,Infrastructure,v1-advisory-multimodel,Low,Low,0.863,315,282,33,0.484,0
+2025-11-01,P019,Energy,v1-advisory-multimodel,Low,Low,0.612,335,323,12,0.435,0
+2025-11-01,P042,Energy,v1-advisory-multimodel,Low,Low,0.783,310,243,67,0.346,0
+2025-11-01,P043,Public Sector,v1-advisory-multimodel,Low,Medium,0.587,343,333,10,0.47,0
+2025-11-01,P060,Industrial,v1-advisory-multimodel,Low,Low,0.623,350,342,8,0.344,0
+2025-11-01,P067,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.673,329,321,8,0.385,0
+2025-11-01,P077,Energy,v1-advisory-multimodel,High,Medium,0.782,296,289,7,0.39,0
+2025-11-01,P113,Infrastructure,v1-advisory-multimodel,Low,Low,0.573,336,332,4,0.342,0
+2025-11-01,P117,Energy,v1-advisory-multimodel,High,High,0.599,375,357,18,0.457,0
+2025-11-01,P124,Energy,v1-advisory-multimodel,High,High,0.578,359,349,10,0.342,0
+2025-11-01,P128,Industrial,v1-advisory-multimodel,Low,Low,0.872,258,236,22,0.277,0
+2025-11-01,P130,Industrial,v1-advisory-multimodel,Medium,Low,0.604,347,317,30,0.334,0
+2025-11-01,P132,Energy,v1-advisory-multimodel,Low,Low,0.455,270,263,7,0.431,0
+2025-11-01,P165,Infrastructure,v1-advisory-multimodel,Low,Low,0.715,301,291,10,0.305,0
+2025-11-01,P196,Public Sector,v1-advisory-multimodel,High,Medium,0.538,287,255,32,0.41,0
+2025-11-01,P204,Public Sector,v1-advisory-multimodel,Low,Low,0.665,267,261,6,0.359,0
+2025-11-01,P221,Energy,v1-advisory-multimodel,Low,Low,0.602,278,270,8,0.413,0
+2025-11-01,P240,Commercial,v1-advisory-multimodel,Low,Low,0.586,338,330,8,0.489,0
+2025-11-01,P275,Infrastructure,v1-advisory-multimodel,High,High,0.539,346,330,16,0.467,0
+2025-11-01,P276,Industrial,v1-advisory-multimodel,Medium,Medium,0.59,312,304,8,0.399,0
+2025-11-01,P289,Public Sector,v1-advisory-multimodel,Low,Low,0.866,278,241,37,0.399,0
+2025-11-01,P315,Commercial,v1-advisory-multimodel,Medium,Medium,0.557,326,313,13,0.569,1
+2025-11-01,P319,Public Sector,v1-advisory-multimodel,Low,Low,0.825,286,237,49,0.374,0
+2025-11-01,P325,Energy,v1-advisory-multimodel,Medium,Medium,0.755,307,282,25,0.41,0
+2025-11-01,P357,Commercial,v1-advisory-multimodel,Low,Low,0.733,296,243,53,0.367,0
+2025-12-01,P023,Industrial,v1-advisory-multimodel,Medium,Low,0.539,310,289,21,0.311,0
+2025-12-01,P026,Infrastructure,v1-advisory-multimodel,Low,Low,0.791,281,250,31,0.48,0
+2025-12-01,P030,Energy,v1-advisory-multimodel,Low,Low,0.819,331,325,6,0.404,0
+2025-12-01,P037,Commercial,v1-advisory-multimodel,Medium,Medium,0.631,214,203,11,0.513,0
+2025-12-01,P048,Industrial,v1-advisory-multimodel,High,High,0.57,395,389,6,0.363,0
+2025-12-01,P057,Public Sector,v1-advisory-multimodel,Low,Medium,0.741,304,275,29,0.48,0
+2025-12-01,P062,Public Sector,v1-advisory-multimodel,High,Medium,0.524,255,251,4,0.388,0
+2025-12-01,P076,Commercial,v1-advisory-multimodel,Low,Medium,0.58,236,227,9,0.417,0
+2025-12-01,P114,Energy,v1-advisory-multimodel,Low,Low,0.707,247,233,14,0.383,0
+2025-12-01,P134,Commercial,v1-advisory-multimodel,Low,Medium,0.456,241,233,8,0.304,0
+2025-12-01,P140,Industrial,v1-advisory-multimodel,Low,Low,0.719,265,252,13,0.457,0
+2025-12-01,P145,Energy,v1-advisory-multimodel,Medium,Medium,0.496,330,324,6,0.445,0
+2025-12-01,P151,Infrastructure,v1-advisory-multimodel,Low,Low,0.677,345,314,31,0.35,0
+2025-12-01,P154,Public Sector,v1-advisory-multimodel,Medium,Low,0.653,291,287,4,0.293,0
+2025-12-01,P164,Public Sector,v1-advisory-multimodel,Medium,Medium,0.513,329,321,8,0.401,0
+2025-12-01,P169,Infrastructure,v1-advisory-multimodel,Medium,Low,0.43,316,298,18,0.374,0
+2025-12-01,P171,Public Sector,v1-advisory-multimodel,Low,Low,0.497,330,305,25,0.36,0
+2025-12-01,P173,Commercial,v1-advisory-multimodel,Low,Low,0.603,279,268,11,0.202,0
+2025-12-01,P184,Commercial,v1-advisory-multimodel,Low,Low,0.473,312,303,9,0.437,0
+2025-12-01,P199,Industrial,v1-advisory-multimodel,Low,Medium,0.439,234,227,7,0.522,0
+2025-12-01,P209,Infrastructure,v1-advisory-multimodel,Low,Medium,0.586,336,323,13,0.399,0
+2025-12-01,P223,Public Sector,v1-advisory-multimodel,Low,Low,0.642,296,285,11,0.377,0
+2025-12-01,P238,Public Sector,v1-advisory-multimodel,Low,Low,0.924,316,281,35,0.248,0
+2025-12-01,P246,Public Sector,v1-advisory-multimodel,High,Medium,0.661,352,340,12,0.416,0
+2025-12-01,P281,Commercial,v1-advisory-multimodel,Medium,Low,0.517,224,228,4,0.49,0
+2025-12-01,P308,Energy,v1-advisory-multimodel,Medium,High,0.701,408,394,14,0.302,0
+2025-12-01,P321,Commercial,v1-advisory-multimodel,Low,Low,0.942,308,301,7,0.387,0
+2025-12-01,P340,Commercial,v1-advisory-multimodel,Medium,Medium,0.776,220,201,19,0.479,0
+2026-01-01,P017,Public Sector,v1-advisory-multimodel,Medium,Medium,0.885,392,385,7,0.431,0
+2026-01-01,P027,Infrastructure,v1-advisory-multimodel,Medium,Low,0.527,305,294,11,0.326,0
+2026-01-01,P039,Industrial,v1-advisory-multimodel,Medium,Medium,0.612,286,276,10,0.318,0
+2026-01-01,P058,Commercial,v1-advisory-multimodel,Low,Low,0.604,248,184,64,0.347,0
+2026-01-01,P061,Commercial,v1-advisory-multimodel,Low,Low,0.654,273,260,13,0.363,0
+2026-01-01,P070,Public Sector,v1-advisory-multimodel,Low,Low,0.772,300,272,28,0.447,0
+2026-01-01,P073,Industrial,v1-advisory-multimodel,Low,Low,0.534,373,362,11,0.268,0
+2026-01-01,P083,Energy,v1-advisory-multimodel,Medium,Medium,0.691,331,326,5,0.567,3
+2026-01-01,P095,Industrial,v1-advisory-multimodel,Medium,High,0.484,365,345,20,0.426,0
+2026-01-01,P108,Energy,v1-advisory-multimodel,Medium,Low,0.554,404,388,16,0.468,0
+2026-01-01,P121,Infrastructure,v1-advisory-multimodel,Low,Low,0.642,271,228,43,0.274,0
+2026-01-01,P142,Energy,v1-advisory-multimodel,Low,Low,0.788,288,278,10,0.255,0
+2026-01-01,P146,Energy,v1-advisory-multimodel,Low,Low,0.818,337,335,2,0.32,0
+2026-01-01,P160,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.569,284,269,15,0.4,0
+2026-01-01,P172,Public Sector,v1-advisory-multimodel,Medium,Medium,0.901,290,280,10,0.468,0
+2026-01-01,P219,Industrial,v1-advisory-multimodel,Medium,Medium,0.719,327,323,4,0.388,0
+2026-01-01,P241,Infrastructure,v1-advisory-multimodel,Low,Low,0.49,314,311,3,0.398,0
+2026-01-01,P254,Industrial,v1-advisory-multimodel,Medium,Medium,0.533,317,310,7,0.371,0
+2026-01-01,P266,Commercial,v1-advisory-multimodel,Low,Medium,0.449,290,277,13,0.375,0
+2026-01-01,P273,Commercial,v1-advisory-multimodel,Low,Low,0.757,237,175,62,0.294,0
+2026-01-01,P278,Commercial,v1-advisory-multimodel,Low,Low,0.715,326,325,1,0.403,0
+2026-01-01,P300,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.777,316,305,11,0.378,0
+2026-01-01,P304,Industrial,v1-advisory-multimodel,Low,Low,0.864,293,286,7,0.349,0
+2026-01-01,P310,Infrastructure,v1-advisory-multimodel,Low,Low,0.593,212,182,30,0.468,0
+2026-01-01,P333,Public Sector,v1-advisory-multimodel,Medium,Medium,0.659,317,307,10,0.453,0
+2026-01-01,P337,Infrastructure,v1-advisory-multimodel,Low,Low,0.544,350,341,9,0.285,0
+2026-01-01,P339,Commercial,v1-advisory-multimodel,Medium,Medium,0.574,295,284,11,0.357,0
+2026-01-01,P345,Public Sector,v1-advisory-multimodel,Low,Low,0.853,357,359,2,0.327,0
+2026-02-01,P005,Industrial,v1-advisory-multimodel,Low,Low,0.555,315,299,16,0.228,0
+2026-02-01,P007,Commercial,v1-advisory-multimodel,Low,Low,0.523,308,298,10,0.321,0
+2026-02-01,P011,Public Sector,v1-advisory-multimodel,Low,Low,0.674,280,259,21,0.208,0
+2026-02-01,P016,Public Sector,v1-advisory-multimodel,Low,Low,0.784,262,212,50,0.341,0
+2026-02-01,P018,Commercial,v1-advisory-multimodel,Medium,Low,0.624,293,248,45,0.329,0
+2026-02-01,P024,Industrial,v1-advisory-multimodel,Low,Low,0.573,305,294,11,0.414,0
+2026-02-01,P029,Infrastructure,v1-advisory-multimodel,Low,Low,0.471,299,269,30,0.387,0
+2026-02-01,P032,Energy,v1-advisory-multimodel,Low,Low,0.871,336,329,7,0.38,0
+2026-02-01,P040,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.651,365,362,3,0.401,0
+2026-02-01,P045,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.606,248,241,7,0.478,0
+2026-02-01,P047,Infrastructure,v1-advisory-multimodel,Medium,Low,0.584,275,254,21,0.349,0
+2026-02-01,P075,Energy,v1-advisory-multimodel,Medium,Low,0.712,253,227,26,0.308,0
+2026-02-01,P082,Infrastructure,v1-advisory-multimodel,Low,Low,0.466,273,261,12,0.287,0
+2026-02-01,P097,Infrastructure,v1-advisory-multimodel,Medium,Low,0.565,279,274,5,0.366,0
+2026-02-01,P102,Industrial,v1-advisory-multimodel,Medium,Low,0.545,249,244,5,0.42,0
+2026-02-01,P112,Commercial,v1-advisory-multimodel,High,High,0.6,325,319,6,0.459,0
+2026-02-01,P119,Industrial,v1-advisory-multimodel,High,Medium,0.64,330,323,7,0.522,0
+2026-02-01,P144,Industrial,v1-advisory-multimodel,Low,Low,0.579,277,268,9,0.248,0
+2026-02-01,P148,Public Sector,v1-advisory-multimodel,Low,Medium,0.62,333,322,11,0.469,0
+2026-02-01,P168,Commercial,v1-advisory-multimodel,High,High,0.579,349,347,2,0.431,0
+2026-02-01,P180,Commercial,v1-advisory-multimodel,Medium,Low,0.747,301,292,9,0.523,0
+2026-02-01,P187,Commercial,v1-advisory-multimodel,Low,Low,0.696,297,284,13,0.375,0
+2026-02-01,P193,Industrial,v1-advisory-multimodel,Low,Low,0.532,275,259,16,0.314,0
+2026-02-01,P198,Public Sector,v1-advisory-multimodel,Low,Low,0.525,302,303,1,0.357,0
+2026-02-01,P210,Industrial,v1-advisory-multimodel,Low,Low,0.774,268,256,12,0.304,0
+2026-02-01,P214,Public Sector,v1-advisory-multimodel,Low,Low,0.62,272,261,11,0.437,0
+2026-02-01,P224,Industrial,v1-advisory-multimodel,Low,Low,0.883,234,224,10,0.288,0
+2026-02-01,P243,Infrastructure,v1-advisory-multimodel,High,Medium,0.591,244,214,30,0.707,1
+2026-02-01,P248,Commercial,v1-advisory-multimodel,Low,Low,0.69,335,289,46,0.441,0
+2026-02-01,P268,Public Sector,v1-advisory-multimodel,High,Medium,0.648,266,259,7,0.406,0
+2026-02-01,P269,Public Sector,v1-advisory-multimodel,Low,Low,0.545,280,250,30,0.307,0
+2026-02-01,P279,Public Sector,v1-advisory-multimodel,Low,Low,0.813,294,286,8,0.416,0
+2026-02-01,P285,Energy,v1-advisory-multimodel,Low,Low,0.645,249,190,59,0.421,0
+2026-02-01,P290,Industrial,v1-advisory-multimodel,Low,Low,0.54,330,316,14,0.359,0
+2026-02-01,P291,Industrial,v1-advisory-multimodel,High,Medium,0.808,301,299,2,0.421,0
+2026-02-01,P332,Infrastructure,v1-advisory-multimodel,Medium,Low,0.57,352,311,41,0.359,0
+2026-02-01,P334,Public Sector,v1-advisory-multimodel,Medium,Medium,0.678,303,302,1,0.501,0
+2026-02-01,P341,Industrial,v1-advisory-multimodel,Medium,Medium,0.585,320,307,13,0.445,0
+2026-03-01,P004,Commercial,v1-advisory-multimodel,Low,Low,0.589,250,245,5,0.366,0
+2026-03-01,P010,Energy,v1-advisory-multimodel,Low,Low,0.673,300,282,18,0.314,0
+2026-03-01,P020,Infrastructure,v1-advisory-multimodel,Low,Medium,0.646,330,322,8,0.554,1
+2026-03-01,P038,Infrastructure,v1-advisory-multimodel,Low,Low,0.445,224,184,40,0.448,0
+2026-03-01,P046,Commercial,v1-advisory-multimodel,Medium,Medium,0.567,278,263,15,0.317,0
+2026-03-01,P056,Commercial,v1-advisory-multimodel,Low,Low,0.825,193,155,38,0.369,0
+2026-03-01,P078,Industrial,v1-advisory-multimodel,High,High,0.743,401,388,13,0.312,0
+2026-03-01,P080,Infrastructure,v1-advisory-multimodel,Low,Low,0.736,233,223,10,0.505,0
+2026-03-01,P086,Infrastructure,v1-advisory-multimodel,Medium,Low,0.505,221,209,12,0.318,0
+2026-03-01,P109,Commercial,v1-advisory-multimodel,Low,Low,0.832,298,287,11,0.29,0
+2026-03-01,P111,Energy,v1-advisory-multimodel,Low,Low,0.477,272,233,39,0.293,0
+2026-03-01,P116,Energy,v1-advisory-multimodel,Medium,Medium,0.781,351,339,12,0.545,0
+2026-03-01,P118,Industrial,v1-advisory-multimodel,Medium,Medium,0.631,338,325,13,0.529,0
+2026-03-01,P123,Energy,v1-advisory-multimodel,Low,Low,0.865,323,318,5,0.298,0
+2026-03-01,P137,Industrial,v1-advisory-multimodel,High,High,0.533,439,427,12,0.511,0
+2026-03-01,P158,Infrastructure,v1-advisory-multimodel,Low,Low,0.436,267,260,7,0.324,0
+2026-03-01,P178,Energy,v1-advisory-multimodel,Low,Low,0.536,273,267,6,0.329,0
+2026-03-01,P222,Public Sector,v1-advisory-multimodel,Low,Low,0.515,289,244,45,0.318,0
+2026-03-01,P227,Public Sector,v1-advisory-multimodel,Medium,Low,0.499,378,370,8,0.433,0
+2026-03-01,P230,Commercial,v1-advisory-multimodel,Low,Low,0.608,325,314,11,0.35,0
+2026-03-01,P232,Infrastructure,v1-advisory-multimodel,Low,Low,0.559,289,273,16,0.394,0
+2026-03-01,P235,Infrastructure,v1-advisory-multimodel,Medium,Low,0.612,349,337,12,0.417,0
+2026-03-01,P245,Infrastructure,v1-advisory-multimodel,Medium,Low,0.534,271,260,11,0.217,0
+2026-03-01,P247,Industrial,v1-advisory-multimodel,Medium,High,0.636,387,381,6,0.411,0
+2026-03-01,P256,Commercial,v1-advisory-multimodel,Low,Low,0.707,290,274,16,0.385,0
+2026-03-01,P257,Commercial,v1-advisory-multimodel,Low,Low,0.555,266,213,53,0.25,0
+2026-03-01,P259,Industrial,v1-advisory-multimodel,Medium,Low,0.592,309,295,14,0.402,0
+2026-03-01,P282,Energy,v1-advisory-multimodel,Low,Low,0.504,372,370,2,0.372,0
+2026-03-01,P286,Infrastructure,v1-advisory-multimodel,High,Medium,0.531,283,263,20,0.29,0
+2026-03-01,P306,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.681,310,303,7,0.329,0
+2026-03-01,P338,Commercial,v1-advisory-multimodel,Low,Low,0.869,347,338,9,0.353,0
+2026-03-01,P347,Commercial,v1-advisory-multimodel,Low,Low,0.601,272,264,8,0.311,0
+2026-03-01,P355,Infrastructure,v1-advisory-multimodel,Medium,Medium,0.554,286,278,8,0.521,0
+2026-03-01,P356,Commercial,v1-advisory-multimodel,Low,Low,0.841,263,255,8,0.374,0

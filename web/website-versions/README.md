@@ -18,9 +18,9 @@ Markdown guides:
 
 Notebook versions:
 
-- `../../Notebooks/website-versions/v1-showcase-manual-build.ipynb`
-- `../../Notebooks/website-versions/v2-platform-prototype-manual-build.ipynb`
-- `../../Notebooks/website-versions/v3-lovable-style-manual-build.ipynb`
+- `../../notebooks/website-versions/v1-showcase-manual-build.ipynb`
+- `../../notebooks/website-versions/v2-platform-prototype-manual-build.ipynb`
+- `../../notebooks/website-versions/v3-lovable-style-manual-build.ipynb`
 
 ## Purpose
 
