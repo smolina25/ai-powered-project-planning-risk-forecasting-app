@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>certAIn | Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-page="dashboard">
+    <canvas class="starfield" id="starfield" aria-hidden="true"></canvas>
+    <div class="backdrop-glow glow-a"></div>
+    <div class="backdrop-glow glow-b"></div>
+    <div class="js-site-header"></div>
+    <main>
+      <section class="page-hero page-block">
+        <div>
+          <span class="section-kicker">Dashboard</span>
+          <h1>See forecast health, risk signals, and timeline progress at a glance.</h1>
+          <p>
+            This is the core demo page. It mirrors the product story: completion
+            probability, delay drivers, timeline state, and decision-ready status.
+          </p>
+        </div>
+        <div class="page-hero-panel">
+          <span class="status-pill">Live Advisory</span>
+          <p class="dashboard-note">
+            <strong>Forecast posture:</strong> viable but exposed. Mitigation on
+            integration and migration lowers tail risk before the deadline.
+          </p>
+        </div>
+      </section>
+
+      <section class="dashboard-layout page-block">
+        <article class="dashboard-panel">
+          <div class="section-title">Executive metrics</div>
+          <div class="stats-row">
+            <div class="stats-card">
+              <span class="metric-label">Delay probability</span>
+              <strong class="metric-value">38%</strong>
+            </div>
+            <div class="stats-card">
+              <span class="metric-label">P80 commitment</span>
+              <strong class="metric-value">94 days</strong>
+            </div>
+            <div class="stats-card">
+              <span class="metric-label">Confidence</span>
+              <strong class="metric-value">81%</strong>
+            </div>
+          </div>
+
+          <div class="info-stack">
+            <section class="info-card">
+              <div class="section-title">Risk alerts</div>
+              <div class="alert-row alert-high"><span>API integration at risk</span><strong>78%</strong></div>
+              <div class="alert-row alert-medium"><span>Database migration bottleneck</span><strong>61%</strong></div>
+              <div class="alert-row alert-low"><span>Frontend sprint on track</span><strong>95%</strong></div>
+            </section>
+            <section class="info-card">
+              <div class="section-title">Project timeline</div>
+              <div class="timeline-item"><span>Design Phase</span><div class="progress"><i style="width:100%"></i></div></div>
+              <div class="timeline-item"><span>Development</span><div class="progress"><i style="width:72%"></i></div></div>
+              <div class="timeline-item"><span>Testing</span><div class="progress"><i style="width:30%"></i></div></div>
+              <div class="timeline-item"><span>Launch</span><div class="progress"><i style="width:8%"></i></div></div>
+            </section>
+          </div>
+        </article>
+
+        <aside class="dashboard-sidebar">
+          <div class="section-title">Scenario summary</div>
+          <div class="data-row"><span>Baseline</span><strong class="metric-chip">Watch</strong></div>
+          <div class="data-row"><span>Mitigate risk</span><strong class="metric-chip">Best path</strong></div>
+          <div class="data-row"><span>Accelerate</span><strong class="metric-chip">Higher strain</strong></div>
+          <p class="dashboard-note">
+            Use the scenario layer to show why the recommended commitment is safer
+            than the optimistic schedule.
+          </p>
+          <a href="pricing.html" class="button button-secondary">Compare Plans</a>
+        </aside>
+      </section>
+    </main>
+    <div class="js-site-footer"></div>
+    <script src="./main.js"></script>
+  </body>
+</html>

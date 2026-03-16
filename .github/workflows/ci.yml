@@ -38,4 +38,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t projectsense-ci:latest .
+        run: docker build -t certain-project-intelligence-ci:latest .
