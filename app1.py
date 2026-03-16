@@ -2233,7 +2233,7 @@ footer {
 
 .footer-panel {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background:
     radial-gradient(circle at 12% 34%, rgba(24, 209, 199, 0.08), transparent 18%),
@@ -2570,10 +2570,52 @@ footer {
   color: var(--muted);
 }
 
+.footer-language-shell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  position: relative;
+  z-index: 4;
+}
+
+.footer-language-globe {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(219, 231, 250, 0.84);
+}
+
+.footer-language-globe svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+}
+
+.footer-language-globe img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.footer-language-dropdown {
+  position: relative;
+}
+
+.footer-language-dropdown summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.footer-language-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
 .footer-language-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.55rem;
   min-height: 42px;
   padding: 0 0.95rem;
   border-radius: 999px;
@@ -2582,23 +2624,88 @@ footer {
   color: #dbe7fa;
 }
 
+.footer-language-dropdown[open] .footer-language-pill {
+  border-color: rgba(109, 165, 255, 0.18);
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .footer-language-flag {
-  min-width: 24px;
-  height: 24px;
-  padding: 0 0.35rem;
-  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(76, 138, 244, 0.16);
-  color: #eef5ff;
-  font-size: 0.72rem;
-  font-weight: 700;
+  width: 18px;
+  height: 13px;
+  line-height: 1;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.footer-language-flag svg {
+  display: block;
+  width: 18px;
+  height: 13px;
+}
+
+.footer-language-flag img {
+  display: block;
+  width: 18px;
+  height: 13px;
 }
 
 .footer-language-caret {
   color: rgba(219, 231, 250, 0.72);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.footer-language-dropdown[open] .footer-language-caret {
+  transform: rotate(180deg);
+}
+
+.footer-language-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.7rem);
+  min-width: 160px;
+  display: grid;
+  gap: 0;
+  padding: 0.45rem 0;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 14, 24, 0.98);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.34);
+}
+
+.footer-language-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.68rem 0.95rem;
+  color: #eef5ff;
+  font-size: 0.98rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.footer-language-option.selected {
+  color: var(--blue-strong);
+}
+
+.footer-language-option-flag {
+  min-width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.footer-language-option-flag img {
+  display: block;
+  width: 18px;
+  height: 13px;
+  border-radius: 2px;
 }
 
 .dashboard-note {
@@ -2936,6 +3043,11 @@ def _nav_logo_data_uri() -> str:
     return ""
 
 
+def _svg_data_uri(svg: str) -> str:
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
 def _brand_lockup(location: str, caption: str | None = None) -> str:
     logo_uri = _logo_data_uri()
     if logo_uri:
@@ -3244,6 +3356,88 @@ def _render_floating_shortcut(active_page: str) -> None:
 
 
 def _render_footer() -> None:
+    globe_icon_uri = _svg_data_uri(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e8f1ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M3 12h18"/>
+          <path d="M12 3a14.5 14.5 0 0 1 0 18"/>
+          <path d="M12 3a14.5 14.5 0 0 0 0 18"/>
+        </svg>
+        """
+    )
+    flag_icon_uri = _svg_data_uri(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 19 13">
+          <rect width="19" height="13" fill="#B22234"/>
+          <rect y="1" width="19" height="1" fill="#ffffff"/>
+          <rect y="3" width="19" height="1" fill="#ffffff"/>
+          <rect y="5" width="19" height="1" fill="#ffffff"/>
+          <rect y="7" width="19" height="1" fill="#ffffff"/>
+          <rect y="9" width="19" height="1" fill="#ffffff"/>
+          <rect y="11" width="19" height="1" fill="#ffffff"/>
+          <rect width="8.2" height="7" fill="#3C3B6E"/>
+          <circle cx="1.3" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="3" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="4.7" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="6.4" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="2.15" cy="2.45" r="0.35" fill="#ffffff"/>
+          <circle cx="3.85" cy="2.45" r="0.35" fill="#ffffff"/>
+          <circle cx="5.55" cy="2.45" r="0.35" fill="#ffffff"/>
+          <circle cx="1.3" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="3" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="4.7" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="6.4" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="2.15" cy="4.75" r="0.35" fill="#ffffff"/>
+          <circle cx="3.85" cy="4.75" r="0.35" fill="#ffffff"/>
+          <circle cx="5.55" cy="4.75" r="0.35" fill="#ffffff"/>
+        </svg>
+        """
+    )
+    farsi_flag_icon_uri = _svg_data_uri(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 19 13">
+          <rect width="19" height="13" fill="#da1f26"/>
+          <rect width="19" height="8.6667" fill="#ffffff"/>
+          <rect width="19" height="4.3333" fill="#239f40"/>
+          <g fill="none" stroke="#d8a828" stroke-width="0.22" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9.5" cy="6.55" r="1.15" fill="#e3b63a" stroke="#c99512"/>
+            <path d="M9.5 4.6v-1.1M8.85 4.85l-.35-.85M10.15 4.85l.35-.85M8.25 5.3l-.8-.35M10.75 5.3l.8-.35M8.2 6.15H7.2M10.8 6.15h1M8.25 7l-.8.35M10.75 7l.8.35"/>
+            <path d="M7.95 8.35c.1-.6.55-.95 1.2-.95h1.25c.8 0 1.15.55 1.18 1.05"/>
+            <path d="M8.2 8.25l-.22.7M10.9 8.25l.28.68M8.9 7.4c-.22-.52-.18-1.05.12-1.45M10.05 7.32c.48-.18.78-.55.95-.98"/>
+            <path d="M6.65 8.95h5.7"/>
+            <path d="M8.15 5.15l.45-.75h1.8l.45.75"/>
+            <path d="M8.95 4.15l.55-.45.55.45"/>
+            <path d="M9.5 3.1l.28-.32.28.32"/>
+            <path d="M7.05 5.2c-.6.65-.9 1.45-.88 2.3M11.95 5.2c.58.65.9 1.45.88 2.3"/>
+          </g>
+        </svg>
+        """
+    )
+    language_options = [
+        ("English", f'<img src="{flag_icon_uri}" alt="" />', True),
+        ("فارسی", f'<img src="{farsi_flag_icon_uri}" alt="" />', False),
+        ("עברית", "🇮🇱", False),
+        ("Deutsch", "🇩🇪", False),
+        ("Italiano", "🇮🇹", False),
+        ("Español", "🇪🇸", False),
+        ("Français", "🇫🇷", False),
+        ("Português", "🇧🇷", False),
+        ("中文", "🇨🇳", False),
+        ("日本語", "🇯🇵", False),
+        ("العربية", "🇸🇦", False),
+    ]
+    language_menu_markup = "".join(
+        (
+            '<div class="footer-language-option'
+            + (" selected" if selected else "")
+            + '">'
+            + f'<span class="footer-language-option-flag">{flag_markup}</span>'
+            + f"<span>{label}</span>"
+            + "</div>"
+        )
+        for label, flag_markup, selected in language_options
+    )
     link_columns_markup = []
     for title, items in FOOTER_LINK_COLUMNS:
         item_markup = []
@@ -3313,10 +3507,22 @@ def _render_footer() -> None:
               </div>
               <div class="footer-bottom-row">
                 <span>&copy; 2026 certAIn. All rights reserved.</span>
-                <div class="footer-language-pill">
-                  <span class="footer-language-flag">US</span>
-                  <span>English</span>
-                  <span class="footer-language-caret">v</span>
+                <div class="footer-language-shell">
+                  <span class="footer-language-globe" aria-hidden="true">
+                    <img src="{globe_icon_uri}" alt="" />
+                  </span>
+                  <details class="footer-language-dropdown">
+                    <summary class="footer-language-pill">
+                      <span class="footer-language-flag" aria-hidden="true">
+                        <img src="{flag_icon_uri}" alt="" />
+                      </span>
+                      <span>English</span>
+                      <span class="footer-language-caret">▾</span>
+                    </summary>
+                    <div class="footer-language-menu">
+                      {language_menu_markup}
+                    </div>
+                  </details>
                 </div>
               </div>
             </div>
