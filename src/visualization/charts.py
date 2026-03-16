@@ -6,6 +6,25 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[index : index + 2], 16) for index in (0, 2, 4))
+
+
+def _blend_hex(start: str, end: str, fraction: float) -> str:
+    start_rgb = _hex_to_rgb(start)
+    end_rgb = _hex_to_rgb(end)
+    channels = [
+        round(start_value + (end_value - start_value) * fraction)
+        for start_value, end_value in zip(start_rgb, end_rgb)
+    ]
+    return "#" + "".join(f"{channel:02x}" for channel in channels)
+
+
+def _bin_index(edges: np.ndarray, value: float) -> int:
+    return int(np.clip(np.searchsorted(edges, value, side="right") - 1, 0, len(edges) - 2))
+
+
 def completion_histogram(
     completion_times: np.ndarray,
     deadline: float,
@@ -13,46 +32,126 @@ def completion_histogram(
     p80: float,
 ) -> go.Figure:
     """Build histogram for completion-time distribution."""
-    figure = go.Figure()
-    figure.add_trace(
-        go.Histogram(
-            x=completion_times,
-            nbinsx=40,
+    values = np.asarray(completion_times, dtype=float)
+    if values.size == 0:
+        return go.Figure()
+
+    counts, edges = np.histogram(values, bins=10)
+    centers = (edges[:-1] + edges[1:]) / 2
+    widths = np.diff(edges) * 0.66
+
+    p50_index = _bin_index(edges, p50)
+    p80_index = _bin_index(edges, p80)
+    deadline_index = _bin_index(edges, deadline)
+
+    edge_blue = "#3568ff"
+    peak_cyan = "#25e6ff"
+    accent_blue = "#59b7ff"
+    coral = "#e6684b"
+    gold = "#c88b16"
+
+    normalized_counts = counts / max(float(counts.max()), 1.0)
+    base_colors = [
+        _blend_hex(
+            edge_blue,
+            peak_cyan,
+            min(1.0, 0.24 + (float(level) ** 0.72) * 0.76),
+        )
+        for level in normalized_counts
+    ]
+    bar_colors = base_colors
+
+    customdata = np.column_stack((edges[:-1], edges[1:]))
+
+    figure = go.Figure(
+        go.Bar(
+            x=centers,
+            y=counts,
+            width=widths,
+            marker=dict(
+                color=bar_colors,
+                line=dict(color="rgba(0,0,0,0)", width=0),
+                cornerradius=12,
+            ),
+            customdata=customdata,
+            hovertemplate=(
+                "Completion window %{customdata[0]:.1f}-%{customdata[1]:.1f} days"
+                "<br>Simulations %{y}<extra></extra>"
+            ),
             name="Simulated completion",
-            marker_color="#0e7490",
-            opacity=0.78,
+            showlegend=False,
         )
     )
 
-    figure.add_vline(
-        x=deadline,
-        line_dash="dash",
-        line_color="#b91c1c",
-        annotation_text=f"Deadline ({deadline:.1f}d)",
-        annotation_position="top",
+    # Add legend chips matching the prototype styling.
+    figure.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="markers",
+            marker=dict(size=10, color=accent_blue),
+            name="P50 anchor",
+            hoverinfo="skip",
+        )
     )
-    figure.add_vline(
-        x=p50,
-        line_dash="dot",
-        line_color="#0f766e",
-        annotation_text=f"P50 ({p50:.1f}d)",
-        annotation_position="top",
+    figure.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="markers",
+            marker=dict(size=10, color=coral),
+            name="P80 anchor",
+            hoverinfo="skip",
+        )
     )
-    figure.add_vline(
-        x=p80,
-        line_dash="dot",
-        line_color="#ca8a04",
-        annotation_text=f"P80 ({p80:.1f}d)",
-        annotation_position="top",
+    figure.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="markers",
+            marker=dict(size=10, color=gold),
+            name="Deadline",
+            hoverinfo="skip",
+        )
     )
+
+    max_count = float(counts.max()) if counts.size else 1.0
+    markers = [
+        (p50_index, p50, "P50", accent_blue, 20),
+        (p80_index, p80, "P80", coral, 44),
+        (deadline_index, deadline, "Deadline", gold, 68),
+    ]
+    for index, value, label, color, y_shift in markers:
+        figure.add_annotation(
+            x=float(centers[index]),
+            y=float(counts[index]),
+            text=f"{label} {value:.1f}d",
+            showarrow=False,
+            yshift=y_shift,
+            font=dict(color="#f4f8ff", size=11),
+            bgcolor="rgba(7, 14, 26, 0.92)",
+            bordercolor=color,
+            borderwidth=1,
+            borderpad=6,
+        )
 
     figure.update_layout(
         title="Monte Carlo Completion Distribution",
         xaxis_title="Completion time (days)",
-        yaxis_title="Frequency",
-        bargap=0.05,
+        yaxis_title="Simulation count",
+        bargap=0.22,
+        barcornerradius=12,
         template="plotly_white",
         height=430,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0.0,
+        ),
+        margin=dict(l=18, r=18, t=88, b=18),
     )
     return figure
 
