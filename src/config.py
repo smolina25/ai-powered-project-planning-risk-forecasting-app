@@ -4,7 +4,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency in some local shells
+    def load_dotenv() -> bool:
+        return False
 
 load_dotenv()
 
@@ -40,6 +44,7 @@ class Settings:
     demo_default_mode: str = os.getenv("DEMO_DEFAULT_MODE", "mock").strip().lower()
     groq_api_key: str = os.getenv("GROQ_API_KEY", "").strip()
     groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+    app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8501").strip().rstrip("/")
 
     default_iterations: int = _to_int(os.getenv("DEFAULT_ITERATIONS"), 1000)
     max_iterations: int = _to_int(os.getenv("MAX_ITERATIONS"), 2000)
@@ -55,12 +60,22 @@ class Settings:
         "models/risk_model_metrics.json",
     ).strip()
     risk_model_version: str = os.getenv("RISK_MODEL_VERSION", "v1-advisory-multimodel").strip()
+    smtp_host: str = os.getenv("SMTP_HOST", "").strip()
+    smtp_port: int = _to_int(os.getenv("SMTP_PORT"), 587)
+    smtp_username: str = os.getenv("SMTP_USERNAME", "").strip()
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "").strip()
+    smtp_sender_email: str = os.getenv("SMTP_SENDER_EMAIL", "").strip()
+    smtp_sender_name: str = os.getenv("SMTP_SENDER_NAME", "certAIn").strip()
+    smtp_use_tls: bool = _to_bool(os.getenv("SMTP_USE_TLS"), True)
+    smtp_use_ssl: bool = _to_bool(os.getenv("SMTP_USE_SSL"), False)
 
     def validate(self) -> None:
         if self.app_mode not in {"real", "mock"}:
             raise ValueError("APP_MODE must be either 'real' or 'mock'.")
         if self.demo_default_mode not in {"real", "mock"}:
             raise ValueError("DEMO_DEFAULT_MODE must be either 'real' or 'mock'.")
+        if not self.app_base_url:
+            raise ValueError("APP_BASE_URL cannot be empty.")
         if self.default_iterations <= 0:
             raise ValueError("DEFAULT_ITERATIONS must be greater than 0.")
         if self.max_iterations <= 0:
@@ -79,6 +94,16 @@ class Settings:
             raise ValueError("RISK_MODEL_METRICS_PATH cannot be empty.")
         if not self.risk_model_version:
             raise ValueError("RISK_MODEL_VERSION cannot be empty.")
+        if self.smtp_port <= 0:
+            raise ValueError("SMTP_PORT must be greater than 0.")
+        if self.smtp_use_tls and self.smtp_use_ssl:
+            raise ValueError("SMTP_USE_TLS and SMTP_USE_SSL cannot both be enabled.")
+        smtp_fields = (
+            self.smtp_host,
+            self.smtp_sender_email,
+        )
+        if any(smtp_fields) and not all(smtp_fields):
+            raise ValueError("SMTP_HOST and SMTP_SENDER_EMAIL must both be set to enable email delivery.")
 
     @property
     def sqlite_db_file(self) -> Path:
@@ -91,6 +116,10 @@ class Settings:
     @property
     def risk_model_metrics_file(self) -> Path:
         return Path(self.risk_model_metrics_path)
+
+    @property
+    def smtp_enabled(self) -> bool:
+        return bool(self.smtp_host and self.smtp_sender_email)
 
 
 settings = Settings()

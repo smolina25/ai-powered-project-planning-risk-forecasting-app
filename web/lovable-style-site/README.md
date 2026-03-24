@@ -4,7 +4,7 @@ This folder contains a standalone landing page inspired by the visual structure 
 
 It does not replace:
 
-- `app.py`
+- `app1.py`
 - `web/platform-prototype/`
 - `web/showcase/`
 

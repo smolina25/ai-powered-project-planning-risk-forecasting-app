@@ -8,19 +8,14 @@ This folder organizes the separate website variants built for the project.
 - `v2` product prototype: `../platform-prototype/`
 - `v3` lovable-style multi-page site: `../lovable-style-site/`
 
-## Manual Build Documentation
+## Supporting Files
 
-Markdown guides:
+Each version is self-contained in its folder. Supporting repo files you may want alongside them:
 
-- `../../docs/website-build-guides/v1-showcase-manual-build.md`
-- `../../docs/website-build-guides/v2-platform-prototype-manual-build.md`
-- `../../docs/website-build-guides/v3-lovable-style-manual-build.md`
-
-Notebook versions:
-
-- `../../notebooks/website-versions/v1-showcase-manual-build.ipynb`
-- `../../notebooks/website-versions/v2-platform-prototype-manual-build.ipynb`
-- `../../notebooks/website-versions/v3-lovable-style-manual-build.ipynb`
+- `../showcase/config.js`
+- `../platform-prototype/README.md`
+- `../lovable-style-site/README.md`
+- `../../presentation/certAIn_midterm_presentation.md`
 
 ## Purpose
 
