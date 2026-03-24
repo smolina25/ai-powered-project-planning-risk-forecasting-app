@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import copy
+import html
 import json
+import re
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.ai.task_generator import generate_task_plan
 from src.analytics.metrics import compute_metrics
@@ -27,6 +30,11 @@ from src.simulation.monte_carlo import run_monte_carlo
 from src.storage.db import init_db
 from src.storage.repository import get_run_details, list_recent_runs, save_session_run
 from src.utils.errors import GraphValidationError, TaskGenerationError
+from src.utils.emailing import (
+    build_subscription_confirmation_link,
+    send_registration_confirmation_email,
+    send_subscription_confirmation_email,
+)
 from src.visualization.charts import (
     completion_histogram,
     dependency_graph_figure,
@@ -60,10 +68,17 @@ NAV_ITEMS = [
     ("dashboard", "Dashboard"),
     ("about", "About Us"),
     ("contact", "Contact Us"),
+    ("faq", "FAQ"),
     ("login", "Login"),
 ]
 
 PAGE_TITLES = {key: label for key, label in NAV_ITEMS}
+PAGE_TITLES["subscription-confirmation"] = "Subscription Confirmation"
+PAGE_TITLES["registration-confirmation"] = "Registration Confirmation"
+PAGE_TITLES["privacy-policy"] = "Privacy Policy"
+PAGE_TITLES["terms-of-service"] = "Terms of Service"
+PAGE_TITLES["cookie-settings"] = "Cookie Settings"
+PAGE_TITLES["security-data-protection"] = "Security & Data Protection"
 
 DASHBOARD_ITEMS = [
     ("guide", "User Guide"),
@@ -81,6 +96,30 @@ DASHBOARD_ITEMS = [
 
 for key, label in DASHBOARD_ITEMS:
     PAGE_TITLES[key] = label
+
+COMMAND_PALETTE_ITEMS = [
+    ("Platform", "home", "Home", "Return to the landing page"),
+    ("Platform", "product", "Product", "Explore the full product story"),
+    ("Platform", "forecasting", "AI Forecasting", "Review advisory ML and forecast evidence"),
+    ("Platform", "monte-carlo", "Monte Carlo", "See probabilistic schedule simulation"),
+    ("Platform", "pricing", "Pricing", "Compare plan options and trial entry points"),
+    ("Platform", "dashboard", "Dashboard", "Open the forecast console"),
+    ("Platform", "about", "About Us", "Read the capstone and team story"),
+    ("Platform", "contact", "Contact Us", "Reach the certAIn team"),
+    ("Platform", "faq", "FAQ", "Browse common product and demo questions"),
+    ("Platform", "login", "Login", "Open the authentication page"),
+    ("Workspace", "guide", "User Guide", "Learn the workspace flow"),
+    ("Workspace", "decision-hub", "Decision Hub", "Review executive decision signals"),
+    ("Workspace", "task-architect", "AI Task Architect", "Generate and inspect task plans"),
+    ("Workspace", "risk-intelligence", "Risk Intelligence", "Explore risk scoring and drivers"),
+    ("Workspace", "simulator", "Monte Carlo Simulator", "Run and compare schedule simulations"),
+    ("Workspace", "what-if", "What-If Scenarios", "Test mitigation and acceleration options"),
+    ("Workspace", "history", "Version History", "Open recent workspace runs"),
+    ("Workspace", "summary", "Executive Summary", "Open the stakeholder-ready summary"),
+    ("Workspace", "upload", "Project Upload", "Preview project file intake"),
+    ("Workspace", "integrations", "Tools Integration", "Review connected delivery tools"),
+    ("Workspace", "settings-page", "Settings", "Adjust workspace preferences"),
+]
 
 DASHBOARD_PAGE_KEYS = {key for key, _ in DASHBOARD_ITEMS} | {"dashboard"}
 
@@ -197,38 +236,37 @@ FOOTER_LINK_COLUMNS = [
     (
         "Product",
         [
-            ("Features", "product", None),
             ("AI Forecasting", "forecasting", None),
             ("Monte Carlo Simulation", "monte-carlo", None),
-            ("Pricing", "pricing", None),
             ("Dashboard", "dashboard", None),
+            ("Pricing", "pricing", None),
         ],
     ),
     (
         "Company",
         [
             ("About Us", "about", None),
-            ("Careers", None, "Coming soon"),
-            ("Blog", None, "Coming soon"),
             ("Contact Us", "contact", None),
+            ("About the Product", "product", None),
+            ("Careers", None, "Coming Soon"),
         ],
     ),
     (
         "Resources",
         [
-            ("Documentation", None, "Coming soon"),
-            ("API Reference", None, "Coming soon"),
-            ("Tools Integration", "integrations", None),
             ("User Guide", "guide", None),
+            ("Tools Integration", "integrations", None),
+            ("Executive Summary", "summary", None),
+            ("FAQ", "faq", None),
         ],
     ),
     (
         "Legal",
         [
-            ("Privacy Policy", None, None),
-            ("Terms of Service", None, None),
-            ("Cookie Policy", None, None),
-            ("Security", None, None),
+            ("Privacy Policy", "privacy-policy", None),
+            ("Terms of Service", "terms-of-service", None),
+            ("Cookie Settings", "cookie-settings", None),
+            ("Security & Data Protection", "security-data-protection", None),
         ],
     ),
 ]
@@ -238,7 +276,36 @@ FOOTER_SOCIALS = [
     ("x", "X"),
     ("github", "GitHub"),
     ("youtube", "YouTube"),
+    ("instagram", "Instagram"),
+    ("facebook", "Facebook"),
 ]
+
+FOOTER_SOCIAL_LINKS = {
+    "linkedin": "https://www.linkedin.com/",
+    "x": "https://x.com/",
+    "github": "https://github.com/",
+    "youtube": "https://www.youtube.com/@meysamehshojaei1296",
+    "instagram": "https://www.instagram.com/",
+    "facebook": "https://www.facebook.com/",
+}
+
+LANGUAGE_OPTIONS = [
+    ("en", "English", "en"),
+    ("fa", "فارسی", "fa"),
+    ("iw", "עברית", "iw"),
+    ("de", "Deutsch", "de"),
+    ("it", "Italiano", "it"),
+    ("es", "Español", "es"),
+    ("fr", "Français", "fr"),
+    ("pt", "Português", "pt"),
+    ("zh-CN", "中文", "zh-CN"),
+    ("ja", "日本語", "ja"),
+    ("ar", "العربية", "ar"),
+]
+
+LANGUAGE_LABELS = {code: label for code, label, _ in LANGUAGE_OPTIONS}
+LANGUAGE_WIDGET_CODES = {code: widget_code for code, _, widget_code in LANGUAGE_OPTIONS}
+SUPPORTED_LANGUAGE_CODES = set(LANGUAGE_LABELS)
 
 FOOTER_COMPLIANCE = [
     ("ISO", "ISO 27001", "International"),
@@ -294,6 +361,20 @@ html, body, [class*="css"] {
 
 body {
   color: var(--text);
+}
+
+body {
+  top: 0 !important;
+}
+
+.goog-te-banner-frame.skiptranslate,
+.goog-te-gadget,
+.goog-logo-link,
+.goog-te-gadget span,
+#google_translate_element,
+#certain_google_translate_element {
+  display: none !important;
+  visibility: hidden !important;
 }
 
 a {
@@ -368,6 +449,21 @@ a {
   100% { background-position: 0% 50%; filter: brightness(0.98); }
 }
 
+@keyframes constellationDrift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(var(--group-scale, 1)); }
+  50% { transform: translate3d(var(--drift-x, 12px), var(--drift-y, -10px), 0) scale(var(--group-scale, 1)); }
+}
+
+@keyframes nodePulse {
+  0%, 100% { opacity: 0.72; filter: brightness(0.96); }
+  50% { opacity: 1; filter: brightness(1.18); }
+}
+
+@keyframes linkPulse {
+  0%, 100% { opacity: 0.14; }
+  50% { opacity: 0.34; }
+}
+
 [data-testid="stHeader"],
 [data-testid="stToolbar"],
 [data-testid="stDecoration"],
@@ -385,6 +481,33 @@ footer {
 
 [data-testid="stSidebar"] > div:first-child {
   background: transparent !important;
+  height: 100vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-bottom: 1.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(117, 231, 255, 0.34) rgba(255, 255, 255, 0.04);
+}
+
+[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+  height: auto !important;
+  min-height: 100vh;
+  overflow: visible !important;
+  padding-bottom: 1.25rem;
+}
+
+[data-testid="stSidebar"] > div:first-child::-webkit-scrollbar {
+  width: 10px;
+}
+
+[data-testid="stSidebar"] > div:first-child::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-testid="stSidebar"] > div:first-child::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(122, 67, 255, 0.75), rgba(24, 209, 199, 0.72));
 }
 
 .stApp,
@@ -407,32 +530,152 @@ footer {
 .saas-shell {
   position: fixed;
   inset: 0;
-  width: 100%;
-  height: 0;
+  width: 100vw;
+  height: 100vh;
   pointer-events: none;
-  z-index: -3;
+  overflow: hidden;
+  z-index: 0;
 }
 
-.starfield {
+.particle-network {
   position: fixed;
   inset: 0;
-  z-index: -2;
+  z-index: 0;
   pointer-events: none;
-  opacity: 0.55;
-  background-image:
-    radial-gradient(circle, rgba(196, 221, 255, 0.85) 0 1px, transparent 1.45px),
-    radial-gradient(circle, rgba(196, 221, 255, 0.38) 0 1px, transparent 1.7px),
-    radial-gradient(circle, rgba(91, 157, 255, 0.22) 0 1px, transparent 2px);
-  background-size: 220px 220px, 310px 310px, 420px 420px;
-  background-position: 0 0, 90px 120px, 180px 60px;
+  overflow: hidden;
+  opacity: 0.9;
+}
+
+.particle-network::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle, rgba(196, 221, 255, 0.22) 0 1px, transparent 1.4px) 8% 18% / 320px 220px,
+    radial-gradient(circle, rgba(120, 176, 255, 0.18) 0 1px, transparent 1.5px) 72% 32% / 360px 260px,
+    radial-gradient(circle, rgba(117, 239, 230, 0.18) 0 1px, transparent 1.4px) 34% 74% / 420px 280px;
+  opacity: 0.45;
+  animation: gradientShift 38s linear infinite;
+}
+
+.particle-network::after {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  background:
+    radial-gradient(circle at 65% 40%, rgba(102, 198, 255, 0.14), transparent 20%),
+    radial-gradient(circle at 36% 62%, rgba(25, 210, 201, 0.08), transparent 18%),
+    radial-gradient(circle at 82% 18%, rgba(155, 92, 255, 0.1), transparent 16%);
+  filter: blur(48px);
+  opacity: 0.42;
+}
+
+.particle-group {
+  position: absolute;
+  width: var(--group-w);
+  height: var(--group-h);
+  animation: constellationDrift var(--duration, 18s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+.particle-group.group-a {
+  top: 16%;
+  right: 7%;
+  --group-w: 280px;
+  --group-h: 156px;
+  --drift-x: 16px;
+  --drift-y: -10px;
+  --duration: 19s;
+}
+
+.particle-group.group-b {
+  top: 43%;
+  left: 31%;
+  --group-w: 212px;
+  --group-h: 172px;
+  --drift-x: -12px;
+  --drift-y: 12px;
+  --duration: 17s;
+  --delay: -7s;
+}
+
+.particle-group.group-c {
+  bottom: 15%;
+  right: 9%;
+  --group-w: 184px;
+  --group-h: 118px;
+  --drift-x: 10px;
+  --drift-y: -8px;
+  --duration: 14s;
+  --delay: -11s;
+}
+
+.particle-link {
+  position: absolute;
+  height: 1px;
+  border-radius: 999px;
+  transform-origin: left center;
+  background: linear-gradient(
+    90deg,
+    rgba(115, 171, 255, 0),
+    rgba(158, 214, 255, 0.55),
+    rgba(115, 171, 255, 0.08)
+  );
+  box-shadow: 0 0 14px rgba(92, 169, 255, 0.18);
+  animation: linkPulse 6.5s ease-in-out infinite;
+}
+
+.particle-node {
+  position: absolute;
+  width: var(--size, 8px);
+  height: var(--size, 8px);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    circle,
+    rgba(244, 250, 255, 0.98) 0 24%,
+    rgba(var(--particle-rgb, 114, 178, 255), 0.94) 42%,
+    rgba(var(--particle-rgb, 114, 178, 255), 0) 78%
+  );
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 18px rgba(var(--particle-rgb, 114, 178, 255), 0.3),
+    0 0 38px rgba(var(--particle-rgb, 114, 178, 255), 0.2);
+  animation: nodePulse var(--pulse, 5.5s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+.particle-node.blue {
+  --particle-rgb: 111, 170, 255;
+}
+
+.particle-node.teal {
+  --particle-rgb: 104, 236, 227;
+}
+
+.particle-node.violet {
+  --particle-rgb: 174, 127, 255;
+}
+
+.particle-node.soft {
+  --particle-rgb: 210, 230, 255;
+}
+
+.particle-node::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: inherit;
+  background: radial-gradient(circle, rgba(var(--particle-rgb, 114, 178, 255), 0.18), transparent 72%);
+  filter: blur(7px);
 }
 
 .ambient-orb {
   position: fixed;
   border-radius: 999px;
-  filter: blur(90px);
-  opacity: 0.48;
-  z-index: -1;
+  filter: blur(110px);
+  opacity: 0.28;
+  z-index: 0;
   pointer-events: none;
   animation: floatDrift 18s ease-in-out infinite;
 }
@@ -442,7 +685,7 @@ footer {
   height: 16rem;
   top: 7rem;
   left: 7%;
-  background: rgba(155, 92, 255, 0.22);
+  background: rgba(155, 92, 255, 0.18);
 }
 
 .orb-b {
@@ -450,7 +693,7 @@ footer {
   height: 20rem;
   top: 18rem;
   right: 7%;
-  background: rgba(25, 210, 201, 0.14);
+  background: rgba(25, 210, 201, 0.12);
   animation-delay: -6s;
 }
 
@@ -459,14 +702,47 @@ footer {
   height: 18rem;
   top: 26rem;
   left: 34%;
-  background: rgba(100, 162, 255, 0.16);
+  background: rgba(100, 162, 255, 0.13);
   animation-delay: -11s;
+}
+
+@media (max-width: 900px) {
+  .particle-group.group-a {
+    right: 4%;
+    --group-scale: 0.86;
+  }
+
+  .particle-group.group-b {
+    left: 14%;
+    top: 48%;
+    --group-scale: 0.82;
+  }
+
+  .particle-group.group-c {
+    right: 4%;
+    bottom: 18%;
+    --group-scale: 0.78;
+  }
 }
 
 .hero-shell,
 .page-shell {
   width: min(100%, var(--content-width));
   margin-inline: auto;
+}
+
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] > .main,
+.block-container,
+.nav-shell,
+[data-testid="stSidebar"] {
+  position: relative;
+}
+
+.block-container,
+.nav-shell,
+[data-testid="stSidebar"] {
+  z-index: 1;
 }
 
 .nav-shell {
@@ -622,6 +898,19 @@ footer {
   align-items: center;
 }
 
+.brand-media.with-wordmark {
+  gap: 0.8rem;
+  width: auto;
+  max-width: 100%;
+}
+
+.brand-logo-shell {
+  width: 58px;
+  flex: 0 0 58px;
+  display: inline-flex;
+  align-items: center;
+}
+
 .brand-lockup.nav .brand-media {
   width: clamp(118px, 16vw, 168px);
 }
@@ -634,7 +923,8 @@ footer {
 }
 
 .brand-lockup.sidebar .brand-media {
-  width: min(100%, 220px);
+  width: auto;
+  max-width: 100%;
 }
 
 .brand-lockup.footer .brand-media {
@@ -646,6 +936,16 @@ footer {
   width: 100%;
   height: auto;
   filter: drop-shadow(0 14px 30px rgba(76, 138, 244, 0.2));
+}
+
+.brand-word-inline {
+  font-family: "Sora", sans-serif;
+  font-size: 1.28rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  white-space: nowrap;
+  color: #eef5ff;
 }
 
 .brand-copy {
@@ -837,6 +1137,7 @@ footer {
 .btn-outline-cta {
   border: 1.5px solid transparent;
   color: #f5fbff;
+  font-weight: 800;
   background:
     linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
     linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box;
@@ -1956,6 +2257,465 @@ footer {
   padding: 2rem 2.1rem;
 }
 
+.about-proto-shell {
+  padding-top: 1.55rem;
+}
+
+.about-top-stage {
+  width: min(100%, 1218px);
+  margin-inline: auto;
+}
+
+.about-proto-hero,
+.about-journey-section,
+.about-final-cta {
+  text-align: center;
+}
+
+.about-proto-hero {
+  display: grid;
+  justify-items: center;
+  gap: 1.45rem;
+  margin-bottom: 4.05rem;
+}
+
+.about-proto-logo-shell {
+  width: clamp(258px, 25.4vw, 296px);
+  height: clamp(160px, 17.1vw, 184px);
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid rgba(137, 109, 255, 0.16);
+  background:
+    linear-gradient(180deg, rgba(2, 5, 11, 0.995), rgba(2, 5, 11, 0.995));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 64px rgba(122, 67, 255, 0.42),
+    0 30px 72px rgba(0, 0, 0, 0.34);
+}
+
+.about-proto-logo-shell img {
+  width: 75%;
+  height: auto;
+  display: block;
+}
+
+.about-proto-title {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(3.3rem, 4.9vw, 4.6rem);
+  line-height: 0.97;
+  letter-spacing: -0.06em;
+}
+
+.about-proto-subtitle {
+  max-width: 900px;
+  margin: 0;
+  color: rgba(232, 241, 255, 0.76);
+  font-size: 1.08rem;
+  line-height: 1.72;
+}
+
+.about-mv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.95rem;
+  margin-bottom: 4.25rem;
+}
+
+.about-mv-card {
+  border: 1px solid transparent;
+  border-radius: 18px;
+  min-height: 280px;
+  padding: 2rem 2rem 1.9rem;
+  text-align: left;
+  background:
+    linear-gradient(180deg, rgba(7, 10, 16, 0.985), rgba(6, 9, 15, 0.995)) padding-box,
+    linear-gradient(135deg, rgba(129, 90, 255, 0.62), rgba(70, 155, 255, 0.48), rgba(55, 214, 255, 0.5)) border-box;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 0 1px rgba(51, 211, 255, 0.08),
+    0 18px 34px rgba(0, 0, 0, 0.2);
+}
+
+.about-card-icon,
+.about-value-icon {
+  width: 3.05rem;
+  height: 3.05rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 15px;
+  border: 1px solid rgba(116, 231, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(36, 47, 105, 0.92), rgba(18, 30, 68, 0.97));
+  color: #eef5ff;
+  font-size: 1.05rem;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.01) inset,
+    0 0 26px rgba(92, 169, 255, 0.24);
+}
+
+.about-card-icon svg,
+.about-value-icon svg {
+  width: 1.24rem;
+  height: 1.24rem;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.about-mv-card h3,
+.about-timeline-card h3 {
+  margin: 1.32rem 0 0.88rem;
+  font-size: 1.2rem;
+  letter-spacing: -0.04em;
+}
+
+.about-mv-card p,
+.about-timeline-card p,
+.about-member-card p,
+.about-value-card p {
+  margin: 0;
+  color: rgba(232, 241, 255, 0.78);
+  line-height: 1.76;
+}
+
+.about-values-section {
+  width: min(100%, 1220px);
+  margin-inline: auto;
+  text-align: center;
+  margin-bottom: 5.15rem;
+}
+
+.about-values-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 40px;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(232, 241, 255, 0.72);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.about-values-pill svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.about-section-heading {
+  margin: 1rem 0 0.7rem;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(2.35rem, 3.4vw, 3.45rem);
+  line-height: 1.02;
+  letter-spacing: -0.06em;
+}
+
+.about-section-copy {
+  max-width: 640px;
+  margin: 0 auto;
+  color: rgba(232, 241, 255, 0.72);
+}
+
+.about-values-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.2rem;
+  margin-top: 2.15rem;
+}
+
+.about-value-card {
+  min-height: 210px;
+  padding: 1.7rem 1.25rem 1.5rem;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(9, 14, 24, 0.9), rgba(6, 10, 18, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.015) inset,
+    0 18px 34px rgba(0, 0, 0, 0.16);
+}
+
+.about-value-card h3 {
+  margin: 1.15rem 0 0.55rem;
+  font-size: 1.18rem;
+  letter-spacing: -0.04em;
+}
+
+.about-journey-section {
+  width: min(100%, 1220px);
+  margin: 0 auto 5.1rem;
+}
+
+.about-timeline {
+  position: relative;
+  width: min(100%, 1000px);
+  margin: 2.45rem auto 0;
+}
+
+.about-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(92, 169, 255, 0.46), rgba(255, 255, 255, 0.04));
+  opacity: 0.7;
+}
+
+.about-timeline-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
+  gap: 1.35rem;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.about-timeline-row:last-child {
+  margin-bottom: 0;
+}
+
+.about-timeline-side {
+  min-width: 0;
+}
+
+.about-timeline-axis {
+  position: relative;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.about-timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #67d8ff, #3b8cff);
+  box-shadow:
+    0 0 0 7px rgba(47, 162, 255, 0.08),
+    0 0 24px rgba(92, 169, 255, 0.42);
+}
+
+.about-timeline-card {
+  width: min(100%, 320px);
+  min-height: 108px;
+  padding: 1.2rem 1.25rem 1.1rem;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(9, 14, 24, 0.9), rgba(6, 10, 18, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.015) inset,
+    0 14px 30px rgba(0, 0, 0, 0.14);
+}
+
+.about-timeline-row.left .about-timeline-card {
+  margin-left: auto;
+  text-align: right;
+}
+
+.about-timeline-row.right .about-timeline-card {
+  margin-right: auto;
+}
+
+.about-timeline-year {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #6fb3ff;
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.about-journey-step-title {
+  margin: 0.08rem 0 0.5rem;
+  font-size: 1.22rem;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+}
+
+.about-team-section {
+  width: min(100%, 1220px);
+  margin-inline: auto;
+  text-align: left;
+  margin-bottom: 5rem;
+}
+
+.about-team-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.9rem;
+}
+
+.about-team-icon {
+  width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(238, 245, 255, 0.92);
+}
+
+.about-team-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.about-team-head .about-section-heading {
+  margin: 0;
+  font-size: clamp(2.05rem, 2.9vw, 2.85rem);
+}
+
+.about-team-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.3rem;
+  margin-top: 0;
+}
+
+.about-member-card {
+  min-height: 278px;
+  padding: 1.5rem 1.45rem 1.6rem;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(9, 14, 24, 0.92), rgba(6, 10, 18, 0.97));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.015) inset,
+    0 18px 34px rgba(0, 0, 0, 0.15);
+}
+
+.about-avatar {
+  width: 4.35rem;
+  height: 4.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1.5px solid rgba(117, 93, 255, 0.55);
+  box-shadow:
+    0 0 0 3px rgba(91, 67, 203, 0.12),
+    0 0 24px rgba(88, 96, 255, 0.15);
+  background: linear-gradient(180deg, rgba(11, 18, 31, 0.98), rgba(9, 15, 27, 0.98));
+}
+
+.about-avatar svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.about-member-card h3 {
+  margin: 1.05rem 0 0.45rem;
+  font-size: 1.17rem;
+  letter-spacing: -0.04em;
+}
+
+.about-member-role {
+  margin-top: 0;
+  margin-bottom: 0.7rem;
+  color: #4794ff;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.about-final-cta {
+  width: min(100%, 1220px);
+  margin: 0 auto;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  padding: 4.45rem 1rem 4.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(180deg, rgba(7, 11, 18, 0.55), rgba(7, 11, 18, 0.2));
+}
+
+.about-final-cta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 42px 42px;
+  opacity: 0.12;
+  pointer-events: none;
+}
+
+.about-final-cta > * {
+  position: relative;
+  z-index: 1;
+}
+
+.about-final-cta h2 {
+  margin: 0 0 0.75rem;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(1.9rem, 3vw, 3rem);
+  line-height: 1.04;
+  letter-spacing: -0.05em;
+}
+
+.about-final-cta p {
+  margin: 0 auto;
+  max-width: 640px;
+  color: rgba(232, 241, 255, 0.78);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.about-sales-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-width: 184px;
+  min-height: 50px;
+  margin-top: 1.8rem;
+  padding: 0 1.55rem;
+  border-radius: 18px;
+  border: 0;
+  background: linear-gradient(90deg, #7a4fff 0%, #3ea3ff 100%);
+  box-shadow: 0 0 28px rgba(76, 138, 244, 0.28);
+  color: #eef5ff;
+  font-family: "Sora", sans-serif;
+  font-size: 0.96rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.about-sales-cta span {
+  font-size: 1.05rem;
+}
+
 .detail-grid {
   display: grid;
   gap: 16px;
@@ -2060,6 +2820,32 @@ footer {
   font-family: "Sora", sans-serif;
   font-weight: 700;
   letter-spacing: -0.01em;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box;
+  box-shadow: none;
+}
+
+.sidebar-shortcut-trigger {
+  appearance: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.sidebar-shortcut-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.22),
+    0 14px 34px rgba(0, 0, 0, 0.18);
+}
+
+.sidebar-shortcut-trigger:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(47, 162, 255, 0.12),
+    0 0 0 1px rgba(117, 231, 255, 0.22);
 }
 
 .sidebar-shortcut-caption {
@@ -2081,6 +2867,7 @@ footer {
   gap: 0.55rem;
   padding: 0.7rem 0.8rem 0.35rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  transition: opacity 180ms ease, transform 180ms ease;
 }
 
 .floating-shortcut-wrap .sidebar-shortcut-pill {
@@ -2093,6 +2880,414 @@ footer {
 
 .hero-shortcut-wrap {
   margin: 0.9rem 0 0.2rem;
+}
+
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5rem 1rem 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.command-palette-overlay.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.command-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 7, 14, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.command-palette-card {
+  position: relative;
+  width: min(100%, 760px);
+  max-height: min(72vh, 680px);
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(109, 165, 255, 0.24);
+  background:
+    linear-gradient(180deg, rgba(7, 13, 24, 0.98), rgba(6, 11, 21, 0.97));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 28px 96px rgba(0, 0, 0, 0.42);
+}
+
+.command-palette-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.05rem 1.15rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.command-palette-title {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.command-palette-title strong {
+  font-family: "Sora", sans-serif;
+  font-size: 1rem;
+}
+
+.command-palette-title span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.command-palette-close {
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.command-palette-search {
+  padding: 1rem 1.15rem 0.75rem;
+}
+
+.command-palette-input {
+  width: 100%;
+  min-height: 54px;
+  padding: 0 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.command-palette-input:focus {
+  border-color: rgba(109, 165, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.08);
+}
+
+.command-palette-list {
+  display: grid;
+  gap: 0.7rem;
+  max-height: min(52vh, 520px);
+  padding: 0 1.15rem 1.15rem;
+  overflow: auto;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.command-palette-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(117, 231, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.command-palette-item.active {
+  border-color: rgba(109, 165, 255, 0.24);
+}
+
+.command-palette-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.command-palette-item-title {
+  font-family: "Sora", sans-serif;
+  font-size: 0.98rem;
+}
+
+.command-palette-item-desc {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.command-palette-item-group {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-palette-empty {
+  padding: 1.4rem 1rem;
+  border-radius: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  text-align: center;
+}
+
+.ai-assistant-shell {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 52;
+  display: grid;
+  justify-items: end;
+  gap: 0.85rem;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+body.footer-visible .floating-shortcut-wrap,
+body.footer-visible .ai-assistant-shell {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(18px);
+}
+
+.ai-assistant-launcher {
+  min-width: 178px;
+  min-height: 56px;
+  padding: 0.7rem 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+  border: 1.5px solid transparent;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box;
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.ai-assistant-launcher:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.22),
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+}
+
+.ai-assistant-launcher:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(47, 162, 255, 0.12),
+    0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.ai-assistant-launcher-icon {
+  width: 2.45rem;
+  height: 2.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(115, 87, 255, 0.95), rgba(47, 162, 255, 0.98));
+  box-shadow: 0 0 26px rgba(78, 143, 255, 0.22);
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.ai-assistant-launcher-copy {
+  display: grid;
+  justify-items: start;
+  gap: 0.14rem;
+  text-align: left;
+}
+
+.ai-assistant-launcher-copy strong {
+  font-family: "Sora", sans-serif;
+  font-size: 0.96rem;
+}
+
+.ai-assistant-launcher-copy span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.ai-assistant-panel {
+  width: min(380px, calc(100vw - 1.5rem));
+  max-height: min(68vh, 620px);
+  overflow: hidden;
+  border-radius: 26px;
+  border: 1px solid rgba(107, 169, 255, 0.24);
+  background: linear-gradient(180deg, rgba(7, 13, 24, 0.985), rgba(5, 10, 19, 0.975));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 28px 88px rgba(0, 0, 0, 0.42);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(16px) scale(0.98);
+  transform-origin: bottom right;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.ai-assistant-shell.is-open .ai-assistant-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.ai-assistant-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 1rem 1rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ai-assistant-head-copy {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.ai-assistant-kicker {
+  color: var(--cyan);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ai-assistant-head-copy strong {
+  font-family: "Sora", sans-serif;
+  font-size: 1rem;
+}
+
+.ai-assistant-head-copy span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.ai-assistant-close {
+  width: 2.15rem;
+  height: 2.15rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ai-assistant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem 0;
+}
+
+.ai-assistant-chip {
+  padding: 0.5rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.ai-assistant-messages {
+  min-height: 210px;
+  max-height: min(42vh, 360px);
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  overflow: auto;
+}
+
+.ai-assistant-message {
+  max-width: 88%;
+  padding: 0.82rem 0.9rem;
+  border-radius: 18px;
+  line-height: 1.55;
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+}
+
+.ai-assistant-message.assistant {
+  justify-self: start;
+  border: 1px solid rgba(117, 231, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ai-assistant-message.user {
+  justify-self: end;
+  background: linear-gradient(135deg, rgba(115, 87, 255, 0.96), rgba(47, 162, 255, 0.96));
+  box-shadow: 0 14px 30px rgba(76, 138, 244, 0.22);
+}
+
+.ai-assistant-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  padding: 0 1rem 1rem;
+}
+
+.ai-assistant-input {
+  min-width: 0;
+  min-height: 50px;
+  padding: 0 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+}
+
+.ai-assistant-input:focus {
+  outline: none;
+  border-color: rgba(109, 165, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.08);
+}
+
+.ai-assistant-send {
+  min-width: 78px;
+  min-height: 50px;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #7357ff 0%, #2fa2ff 100%);
+  box-shadow: 0 12px 28px rgba(76, 138, 244, 0.24);
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .ai-assistant-shell {
+    right: 0.8rem;
+    bottom: 0.9rem;
+  }
+
+  .ai-assistant-panel {
+    width: min(100vw - 1rem, 380px);
+  }
+
+  .ai-assistant-launcher {
+    min-width: 164px;
+  }
 }
 
 .sidebar-section-label {
@@ -2162,6 +3357,73 @@ footer {
 
 .data-pair:last-child {
   border-bottom: none;
+}
+
+.data-pair strong a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.data-pair strong a:hover,
+.data-pair strong a:focus {
+  text-decoration: underline;
+}
+
+.faq-summary-card .data-pair {
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.faq-summary-card .data-pair span {
+  white-space: nowrap;
+}
+
+.faq-summary-card .data-pair strong {
+  white-space: nowrap;
+  font-size: 0.94rem;
+  letter-spacing: -0.01em;
+  text-align: right;
+}
+
+@media (min-width: 1101px) {
+  .faq-summary-card {
+    width: calc(100% + 2.3cm);
+    margin-right: -2.3cm;
+    justify-self: start;
+  }
+}
+
+.contact-social-inline {
+  margin-top: 1rem;
+}
+
+.contact-social-inline strong {
+  display: block;
+  font-family: "Sora", sans-serif;
+  margin-bottom: 0.35rem;
+}
+
+.contact-social-inline p {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+}
+
+.contact-social-inline .footer-social-row {
+  margin-top: 0;
+}
+
+.contact-top-stack {
+  display: grid;
+  gap: 22px;
+}
+
+.contact-right-balance {
+  min-height: clamp(30rem, 46vh, 40rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1rem;
 }
 
 .timeline-grid,
@@ -2403,6 +3665,19 @@ footer {
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.footer-social-pill:hover {
+  transform: translateY(-1px);
+  border-color: rgba(109, 165, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.footer-social-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.12);
 }
 
 .footer-social-icon {
@@ -2437,6 +3712,7 @@ footer {
 }
 
 .footer-link-column a,
+.footer-link-item,
 .footer-static-link {
   color: var(--muted);
   text-decoration: none;
@@ -2444,8 +3720,29 @@ footer {
   line-height: 1.45;
 }
 
-.footer-link-column a:hover {
+.footer-link-column a:hover,
+.footer-link-item:hover {
   color: var(--text);
+}
+
+.footer-legal-link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  position: relative;
+  z-index: 3;
+  cursor: pointer;
+  color: var(--blue-strong);
+  text-decoration: underline;
+  text-decoration-color: rgba(92, 169, 255, 0.78);
+  text-decoration-thickness: 1.45px;
+  text-underline-offset: 0.18em;
+}
+
+.footer-legal-link:hover,
+.footer-legal-link:focus-visible {
+  color: #eef5ff;
+  text-decoration-color: rgba(92, 169, 255, 0.98);
 }
 
 .footer-link-note {
@@ -2491,11 +3788,31 @@ footer {
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
+  color: #eef5ff;
+  font: inherit;
+  appearance: none;
+}
+
+.footer-input-shell::placeholder {
   color: rgba(158, 176, 203, 0.78);
+}
+
+.footer-input-shell:focus {
+  outline: none;
+  border-color: rgba(109, 165, 255, 0.22);
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.08);
 }
 
 .footer-subscribe-btn {
   min-width: 168px;
+  cursor: pointer;
+  appearance: none;
+  color: var(--blue-strong);
+  font-family: "Sora", sans-serif;
+  letter-spacing: -0.01em;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.12em;
 }
 
 .footer-compliance-row {
@@ -2576,6 +3893,7 @@ footer {
   gap: 0.75rem;
   position: relative;
   z-index: 4;
+  margin-right: clamp(7.5rem, 10vw, 9.5rem);
 }
 
 .footer-language-globe {
@@ -2603,13 +3921,10 @@ footer {
   position: relative;
 }
 
-.footer-language-dropdown summary {
-  list-style: none;
-  cursor: pointer;
-}
-
-.footer-language-dropdown summary::-webkit-details-marker {
-  display: none;
+.footer-language-toggle {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .footer-language-pill {
@@ -2622,9 +3937,10 @@ footer {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);
   color: #dbe7fa;
+  cursor: pointer;
 }
 
-.footer-language-dropdown[open] .footer-language-pill {
+.footer-language-toggle:checked + .footer-language-pill {
   border-color: rgba(109, 165, 255, 0.18);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -2653,13 +3969,27 @@ footer {
 }
 
 .footer-language-caret {
-  color: rgba(219, 231, 250, 0.72);
-  font-size: 0.92rem;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(109, 165, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(219, 231, 250, 0.82);
   line-height: 1;
   transition: transform 160ms ease;
 }
 
-.footer-language-dropdown[open] .footer-language-caret {
+.footer-language-caret svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  stroke: currentColor;
+}
+
+.footer-language-toggle:checked + .footer-language-pill .footer-language-caret {
   transform: rotate(180deg);
 }
 
@@ -2667,29 +3997,49 @@ footer {
   position: absolute;
   right: 0;
   bottom: calc(100% + 0.7rem);
-  min-width: 160px;
+  min-width: 188px;
   display: grid;
   gap: 0;
-  padding: 0.45rem 0;
-  border-radius: 18px;
+  padding: 0.5rem 0;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(10, 14, 24, 0.98);
   box-shadow: 0 22px 50px rgba(0, 0, 0, 0.34);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 160ms ease, transform 160ms ease, visibility 160ms ease;
+}
+
+.footer-language-toggle:checked ~ .footer-language-menu {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .footer-language-option {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.68rem 0.95rem;
+  padding: 0.78rem 1rem;
   color: #eef5ff;
   font-size: 0.98rem;
+  font-weight: 500;
   line-height: 1.2;
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .footer-language-option.selected {
   color: var(--blue-strong);
+  font-weight: 600;
+}
+
+.footer-language-option:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .footer-language-option-flag {
@@ -2718,6 +4068,340 @@ footer {
   padding: 1.7rem;
 }
 
+.auth-page-shell {
+  min-height: calc(100vh - 16rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  padding-top: 2.6rem;
+}
+
+.auth-card {
+  width: min(100%, 420px);
+  padding: 1.85rem 1.9rem 1.7rem;
+  border-radius: 24px;
+  border: 1px solid rgba(87, 160, 255, 0.58);
+  background:
+    linear-gradient(180deg, rgba(10, 14, 22, 0.96), rgba(9, 12, 18, 0.94));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 36px rgba(67, 129, 255, 0.14),
+    0 28px 72px rgba(0, 0, 0, 0.46);
+}
+
+.auth-logo-shell {
+  width: 96px;
+  height: 48px;
+  margin: 0 auto 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.35rem;
+  background: linear-gradient(180deg, rgba(9, 13, 22, 0.98), rgba(6, 9, 16, 0.98));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 32px rgba(116, 81, 255, 0.2);
+}
+
+.auth-logo-image {
+  width: 68px;
+  height: auto;
+  display: block;
+}
+
+.auth-logo-fallback {
+  font-family: "Sora", sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.auth-title {
+  margin: 0;
+  text-align: center;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(2rem, 3vw, 2.25rem);
+  letter-spacing: -0.06em;
+}
+
+.auth-title-helper {
+  margin: 0.45rem 0 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.auth-kicker {
+  margin-bottom: 0.65rem;
+  text-align: center;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.auth-subtitle {
+  margin: 0.7rem 0 0;
+  text-align: center;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.auth-register-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  margin-top: 1rem;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #7357ff 0%, #2fa2ff 100%);
+  box-shadow: 0 14px 38px rgba(76, 138, 244, 0.3);
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auth-form-shell {
+  display: grid;
+}
+
+.auth-form-shell input,
+.auth-form-shell button {
+  font: inherit;
+}
+
+.auth-social-stack {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.65rem;
+}
+
+.auth-social-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  min-height: 48px;
+  padding: 0 1rem;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.auth-social-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(105, 168, 255, 0.28);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.auth-social-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.auth-social-icon.google {
+  color: #7ce6ff;
+}
+
+.auth-social-icon.apple {
+  color: #f4f8ff;
+}
+
+.auth-separator {
+  position: relative;
+  margin: 1.35rem 0 1.05rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.auth-separator::before,
+.auth-separator::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: calc(50% - 92px);
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.auth-separator::before {
+  left: 0;
+}
+
+.auth-separator::after {
+  right: 0;
+}
+
+.auth-field-group {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.95rem;
+}
+
+.auth-preview-stack {
+  margin-top: 0.9rem;
+}
+
+.auth-preview-stack .auth-field-group {
+  margin-top: 0.8rem;
+}
+
+.auth-preview-stack .auth-field-group:first-child {
+  margin-top: 0;
+}
+
+.auth-field-group label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.auth-input-shell {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(244, 248, 255, 0.56);
+}
+
+.auth-input-shell.password {
+  letter-spacing: 0.25em;
+  font-size: 1.05rem;
+}
+
+.auth-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 1rem 0 1.3rem;
+}
+
+.auth-check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.auth-checkbox-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+}
+
+.auth-checkbox-input::after {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border: 2px solid #ffffff;
+  border-top: none;
+  border-right: none;
+  transform: rotate(-45deg) scale(0);
+  transition: transform 140ms ease;
+}
+
+.auth-checkbox-input:checked {
+  background: linear-gradient(180deg, #5d97ff 0%, #2fa2ff 100%);
+  border-color: rgba(93, 151, 255, 0.78);
+  box-shadow: 0 0 0 1px rgba(93, 151, 255, 0.16);
+}
+
+.auth-checkbox-input:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+
+.auth-checkbox-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.12);
+}
+
+.auth-forgot-link,
+.auth-inline-link {
+  color: #5d97ff;
+  text-decoration: none;
+}
+
+.auth-forgot-link {
+  font-size: 0.92rem;
+}
+
+.auth-submit-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  border-radius: 16px;
+  border: none;
+  background: linear-gradient(90deg, #7357ff 0%, #2fa2ff 100%);
+  box-shadow: 0 14px 38px rgba(76, 138, 244, 0.3);
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  appearance: none;
+}
+
+.auth-bottom-copy {
+  margin-top: 1.15rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.auth-inline-link {
+  font-weight: 700;
+}
+
+.auth-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.auth-trust-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.auth-trust-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--teal), var(--blue));
+  box-shadow: 0 0 0 6px rgba(24, 209, 199, 0.08);
+}
+
 div[data-testid="stTextArea"] textarea,
 div[data-testid="stTextInput"] input,
 div[data-testid="stNumberInput"] input,
@@ -2736,6 +4420,94 @@ div[data-testid="stSelectbox"] label,
 div[data-testid="stRadio"] label {
   color: var(--text) !important;
   font-weight: 600 !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="base-input"],
+div[data-testid="stForm"] div[data-baseweb="base-input"] > div,
+div[data-testid="stForm"] div[data-baseweb="textarea"],
+div[data-testid="stForm"] div[data-baseweb="select"] > div {
+  border: 1.5px solid transparent !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="base-input"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="textarea"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="select"] > div:focus-within {
+  box-shadow: 0 0 0 1px rgba(117, 231, 255, 0.22) !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextInput"] input,
+div[data-testid="stForm"] div[data-testid="stTextArea"] textarea,
+div[data-testid="stForm"] div[data-testid="stSelectbox"] input {
+  background: transparent !important;
+  color: #f5fbff !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextInput"] input::placeholder,
+div[data-testid="stForm"] div[data-testid="stTextArea"] textarea::placeholder {
+  color: rgba(219, 231, 250, 0.54) !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextArea"] textarea {
+  min-height: 176px !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextArea"] label,
+div[data-testid="stForm"] div[data-testid="stTextInput"] label,
+div[data-testid="stForm"] div[data-testid="stSelectbox"] label {
+  font-family: "Sora", sans-serif !important;
+  font-weight: 700 !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"],
+div[data-testid="stForm"] div[data-baseweb="input"] > div,
+div[data-testid="stForm"] div[data-baseweb="textarea"],
+div[data-testid="stForm"] div[data-baseweb="select"] > div,
+div[data-testid="stForm"] [data-testid="stTextInputRootElement"],
+div[data-testid="stForm"] [data-testid="stTextAreaRootElement"] {
+  border: 1.5px solid transparent !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="textarea"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="select"] > div:focus-within {
+  box-shadow: 0 0 0 1px rgba(117, 231, 255, 0.22) !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"] input,
+div[data-testid="stForm"] div[data-baseweb="textarea"] textarea,
+div[data-testid="stForm"] div[data-baseweb="select"] input {
+  background: transparent !important;
+  border: none !important;
+  color: #f5fbff !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"] input {
+  min-height: 50px !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] button {
+  min-height: 52px;
+  border: none !important;
+  border-radius: 18px !important;
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(115, 87, 255, 0.95), rgba(47, 162, 255, 0.98)) !important;
+  box-shadow: 0 0 26px rgba(78, 143, 255, 0.22) !important;
+  font-weight: 700 !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] button:hover {
+  filter: brightness(1.03);
+  box-shadow: 0 0 32px rgba(78, 143, 255, 0.28) !important;
 }
 
 div[data-testid="stNumberInput"] button {
@@ -2831,9 +4603,39 @@ div[data-testid="stAlert"] {
 }
 
 div[data-testid="stExpander"] {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1.5px solid transparent !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, rgba(155, 92, 255, 0.5) 0%, rgba(100, 162, 255, 0.34) 52%, rgba(24, 209, 199, 0.36) 100%) border-box !important;
+  box-shadow: none !important;
+  overflow: hidden;
+  margin-top: 1rem;
+}
+
+div[data-testid="stExpander"] details,
+div[data-testid="stExpander"] > div {
+  background: transparent !important;
+}
+
+div[data-testid="stExpander"] summary {
+  min-height: 56px;
+  align-items: center;
+}
+
+div[data-testid="stExpander"] summary p {
+  color: #f5fbff !important;
+  font-weight: 700 !important;
+}
+
+.faq-empty-box {
+  min-height: 56px;
+  margin-top: 1rem;
+  border: 1.5px solid transparent;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, rgba(155, 92, 255, 0.5) 0%, rgba(100, 162, 255, 0.34) 52%, rgba(24, 209, 199, 0.36) 100%) border-box;
 }
 
 @media (max-width: 1100px) {
@@ -2869,6 +4671,10 @@ div[data-testid="stExpander"] {
     flex-direction: column;
   }
 
+  .contact-right-balance {
+    min-height: auto;
+  }
+
   .home-proof-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2894,6 +4700,34 @@ div[data-testid="stExpander"] {
   .kpi-grid,
   .detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-mv-grid,
+  .about-values-grid,
+  .about-team-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-timeline::before {
+    left: 18px;
+    transform: none;
+  }
+
+  .about-timeline-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 0.9rem;
+  }
+
+  .about-timeline-axis {
+    grid-column: 1;
+  }
+
+  .about-timeline-side {
+    grid-column: 2;
+  }
+
+  .about-timeline-row .about-timeline-side:empty {
+    display: none;
   }
 
   .metric-showcase-grid,
@@ -2942,6 +4776,20 @@ div[data-testid="stExpander"] {
     grid-template-columns: 1fr;
   }
 
+  .about-mv-grid,
+  .about-values-grid,
+  .about-team-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .about-team-head {
+    justify-content: center;
+  }
+
+  .about-team-section {
+    text-align: center;
+  }
+
   .hero-card,
   .insight-card,
   .hero-visual,
@@ -2976,9 +4824,25 @@ div[data-testid="stExpander"] {
     align-items: flex-start;
   }
 
+  .footer-language-shell {
+    margin-right: 0;
+  }
+
   .floating-shortcut-wrap {
     left: 0.7rem;
     bottom: 0.8rem;
+  }
+
+  .about-proto-logo-shell {
+    width: min(100%, 228px);
+    height: 146px;
+  }
+
+  .about-mv-card,
+  .about-timeline-card,
+  .about-member-card {
+    padding-left: 1.15rem;
+    padding-right: 1.15rem;
   }
 }
 </style>
@@ -2997,11 +4861,101 @@ def _get_query_param(name: str, default: str) -> str:
     return str(value)
 
 
+def _get_query_flag(name: str) -> bool:
+    return _get_query_param(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _set_query_page(page: str) -> None:
+    language_code = st.session_state.get("saas_language_code", "en")
     try:
         st.query_params["page"] = page
+        st.query_params["lang"] = language_code
     except Exception:
-        st.experimental_set_query_params(page=page)
+        st.experimental_set_query_params(page=page, lang=language_code)
+
+
+def _sync_auth_email_from_query() -> None:
+    auth_email = _get_query_param("auth_email", "").strip()
+    if auth_email:
+        st.session_state.saas_user_email = auth_email
+
+
+def _sync_contact_email_from_query() -> None:
+    contact_email = _get_query_param("newsletter_email", "").strip()
+    if contact_email:
+        st.session_state.contact_email = contact_email
+
+
+def _sync_registration_email_from_query() -> None:
+    registration_email = _get_query_param("register_email", "").strip()
+    if registration_email:
+        st.session_state.registration_email = registration_email
+        st.session_state.saas_user_email = registration_email
+
+
+def _sync_language_from_query() -> None:
+    language_code = _get_query_param("lang", "en").strip() or "en"
+    if language_code not in SUPPORTED_LANGUAGE_CODES:
+        language_code = "en"
+    st.session_state.saas_language_code = language_code
+    st.session_state.saas_language = LANGUAGE_LABELS.get(language_code, "English")
+
+
+def _sync_newsletter_subscription_flow(page: str) -> None:
+    if page != "subscription-confirmation":
+        return
+
+    recipient_email = _get_query_param("newsletter_email", "").strip()
+    if recipient_email:
+        st.session_state.contact_email = recipient_email
+
+    confirmed = _get_query_flag("newsletter_confirmed")
+    st.session_state.newsletter_confirmed = confirmed
+    if confirmed:
+        st.session_state.newsletter_delivery_status = "confirmed"
+        st.session_state.newsletter_delivery_message = f"{recipient_email} has been confirmed for certAIn updates."
+        return
+
+    if not recipient_email:
+        return
+
+    request_key = f"{recipient_email}|{st.session_state.get('saas_language_code', 'en')}"
+    if st.session_state.get("newsletter_last_request_key") == request_key:
+        return
+
+    confirmation_link = build_subscription_confirmation_link(
+        recipient_email,
+        settings.app_base_url,
+        lang=st.session_state.get("saas_language_code", "en"),
+    )
+    result = send_subscription_confirmation_email(recipient_email, confirmation_link, settings)
+    if result.sent:
+        st.session_state.newsletter_last_request_key = request_key
+    st.session_state.newsletter_delivery_status = result.status
+    st.session_state.newsletter_delivery_message = result.message
+
+
+def _sync_registration_flow(page: str) -> None:
+    if page != "registration-confirmation":
+        return
+
+    recipient_email = _get_query_param("register_email", "").strip()
+    if recipient_email:
+        st.session_state.registration_email = recipient_email
+        st.session_state.saas_user_email = recipient_email
+
+    if not recipient_email:
+        return
+
+    request_key = f"{recipient_email}|{st.session_state.get('saas_language_code', 'en')}"
+    if st.session_state.get("registration_last_request_key") == request_key:
+        return
+
+    result = send_registration_confirmation_email(recipient_email, settings)
+    if result.sent:
+        st.session_state.registration_last_request_key = request_key
+    st.session_state.registration_delivery_status = result.status
+    st.session_state.registration_delivery_message = result.message
 
 
 def _resolve_page() -> str:
@@ -3009,8 +4963,13 @@ def _resolve_page() -> str:
     return page if page in PAGE_TITLES else "home"
 
 
-def _href(page: str) -> str:
-    return f"?page={page}"
+def _href(page: str, lang: str | None = None) -> str:
+    language_code = lang or st.session_state.get("saas_language_code", "en")
+    return f"?page={page}&lang={language_code}"
+
+
+def _trial_href() -> str:
+    return _href("login")
 
 
 def _is_dashboard_page(page: str) -> bool:
@@ -3019,6 +4978,710 @@ def _is_dashboard_page(page: str) -> bool:
 
 def _top_nav_active_key(page: str) -> str:
     return "dashboard" if _is_dashboard_page(page) else page
+
+
+def _github_profile_href() -> str:
+    email = st.session_state.get("saas_user_email", "").strip().lower()
+    if not email or "@" not in email:
+        return FOOTER_SOCIAL_LINKS["github"]
+
+    local_part = email.split("@", 1)[0]
+    username = re.sub(r"[^a-z0-9-]+", "-", local_part)
+    username = re.sub(r"-{2,}", "-", username).strip("-")[:39]
+    if not username:
+        return FOOTER_SOCIAL_LINKS["github"]
+    return f"https://github.com/{username}"
+
+
+def _assistant_profile(page: str) -> dict[str, Any]:
+    if page == "home":
+        return {
+            "title": "Platform Guide",
+            "summary": "Use this space to understand the product story, core workflow, and where to begin.",
+            "suggestions": [
+                "What can certAIn do?",
+                "Where should I start?",
+                "Explain the platform flow",
+            ],
+        }
+    if page == "product":
+        return {
+            "title": "Product Walkthrough",
+            "summary": "This page explains how certAIn connects planning, forecasting, simulation, and reporting.",
+            "suggestions": [
+                "Summarize the product",
+                "What makes this different?",
+                "How do the modules connect?",
+            ],
+        }
+    if page == "forecasting":
+        return {
+            "title": "Forecasting Help",
+            "summary": "This page focuses on predictive risk signals, model evidence, and earlier intervention.",
+            "suggestions": [
+                "Explain forecasting outputs",
+                "What is the bundled model?",
+                "How should I present this page?",
+            ],
+        }
+    if page == "monte-carlo":
+        return {
+            "title": "Monte Carlo Help",
+            "summary": "This page shows schedule uncertainty, completion ranges, and confidence-based delivery planning.",
+            "suggestions": [
+                "What does Monte Carlo show?",
+                "How do I explain confidence levels?",
+                "What should I look at first?",
+            ],
+        }
+    if page == "pricing":
+        return {
+            "title": "Pricing Help",
+            "summary": "Use this page to compare packages and guide trial or enterprise conversations.",
+            "suggestions": [
+                "Which plan fits a small team?",
+                "Explain the trial path",
+                "What should I say about enterprise?",
+            ],
+        }
+    if page == "login":
+        return {
+            "title": "Access Help",
+            "summary": "This page supports the demo entry flow before users continue into the platform experience.",
+            "suggestions": [
+                "How does the sign-in flow work?",
+                "Where do these buttons go?",
+                "What should a user do next?",
+            ],
+        }
+    if page == "about":
+        return {
+            "title": "Team Story",
+            "summary": "Use this page to explain the capstone story, product vision, and why the platform matters.",
+            "suggestions": [
+                "Summarize the project story",
+                "How should I introduce certAIn?",
+                "What problem does this solve?",
+            ],
+        }
+    if page == "contact":
+        return {
+            "title": "Contact Help",
+            "summary": "This page is the handoff point for questions, demos, and follow-up conversations.",
+            "suggestions": [
+                "What should happen after contact?",
+                "How do I present this page?",
+                "What is the next step after a demo?",
+            ],
+        }
+    if _is_dashboard_page(page):
+        return {
+            "title": PAGE_TITLES.get(page, "Workspace"),
+            "summary": "You are inside the working platform where teams generate plans, inspect risks, compare scenarios, and prepare executive outputs.",
+            "suggestions": [
+                "Explain this workspace page",
+                "What should I do next here?",
+                "How do I present this module?",
+            ],
+        }
+    return {
+        "title": PAGE_TITLES.get(page, "Platform"),
+        "summary": "I can help explain the current page, point to the next step, or answer questions about the product workflow.",
+        "suggestions": [
+            "Explain this page",
+            "What should I do next?",
+            "Summarize certAIn",
+        ],
+    }
+
+
+def _render_command_palette(active_page: str) -> None:
+    items_markup = "".join(
+        dedent(
+            f"""
+            <a
+              href="{_href(page)}"
+              class="command-palette-item {'active' if page == active_page else ''}"
+              data-command-item
+              data-command-text="{(group + ' ' + label + ' ' + description).lower()}"
+            >
+              <div class="command-palette-item-copy">
+                <span class="command-palette-item-title">{label}</span>
+                <span class="command-palette-item-desc">{description}</span>
+              </div>
+              <span class="command-palette-item-group">{group}</span>
+            </a>
+            """
+        ).strip()
+        for group, page, label, description in COMMAND_PALETTE_ITEMS
+    )
+    st.markdown(
+        dedent(
+            f"""
+            <div class="command-palette-overlay" data-command-palette aria-hidden="true">
+              <div class="command-palette-backdrop" data-command-close="true"></div>
+              <div class="command-palette-card" role="dialog" aria-modal="true" aria-label="Quick command search">
+                <div class="command-palette-head">
+                  <div class="command-palette-title">
+                    <strong>Quick command search</strong>
+                    <span>Press ⌘K on Mac or Ctrl+K on Windows/Linux from any platform page.</span>
+                  </div>
+                  <button type="button" class="command-palette-close" data-command-close="true" aria-label="Close command search">×</button>
+                </div>
+                <div class="command-palette-search">
+                  <input
+                    class="command-palette-input"
+                    type="text"
+                    placeholder="Search pages, modules, and actions"
+                    data-command-input
+                  />
+                </div>
+                <div class="command-palette-list" data-command-list>
+                  {items_markup}
+                  <div class="command-palette-empty" data-command-empty hidden>No matching command found.</div>
+                </div>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _mount_command_palette_shortcuts() -> None:
+    components.html(
+        """
+        <script>
+        (() => {
+          const parentWindow = window.parent;
+          const parentDocument = parentWindow.document;
+
+          const getPalette = () => parentDocument.querySelector("[data-command-palette]");
+          const getInput = () => parentDocument.querySelector("[data-command-input]");
+          const getItems = () => Array.from(parentDocument.querySelectorAll("[data-command-item]"));
+          const getEmpty = () => parentDocument.querySelector("[data-command-empty]");
+
+          const filterItems = () => {
+            const input = getInput();
+            if (!input) return;
+            const term = (input.value || "").trim().toLowerCase();
+            let visibleCount = 0;
+            getItems().forEach((item) => {
+              const haystack = item.dataset.commandText || item.textContent.toLowerCase();
+              const show = !term || haystack.includes(term);
+              item.style.display = show ? "" : "none";
+              if (show) visibleCount += 1;
+            });
+            const empty = getEmpty();
+            if (empty) empty.hidden = visibleCount > 0;
+          };
+
+          const openPalette = () => {
+            const palette = getPalette();
+            if (!palette) return;
+            palette.classList.add("is-open");
+            palette.setAttribute("aria-hidden", "false");
+            parentDocument.body.classList.add("palette-open");
+            parentWindow.requestAnimationFrame(() => {
+              const input = getInput();
+              if (input) {
+                input.focus();
+                input.select();
+              }
+              filterItems();
+            });
+          };
+
+          const closePalette = () => {
+            const palette = getPalette();
+            if (!palette) return;
+            palette.classList.remove("is-open");
+            palette.setAttribute("aria-hidden", "true");
+            parentDocument.body.classList.remove("palette-open");
+          };
+
+          const attachHandlers = () => {
+            if (parentWindow.__certainPaletteInit) return;
+
+            parentDocument.addEventListener("click", (event) => {
+              const trigger = event.target.closest("[data-command-trigger]");
+              if (trigger) {
+                event.preventDefault();
+                openPalette();
+                return;
+              }
+
+              const closer = event.target.closest("[data-command-close]");
+              if (closer) {
+                event.preventDefault();
+                closePalette();
+              }
+            });
+
+            parentDocument.addEventListener("input", (event) => {
+              if (event.target.matches("[data-command-input]")) {
+                filterItems();
+              }
+            });
+
+            parentDocument.addEventListener("keydown", (event) => {
+              const isShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
+              if (isShortcut) {
+                event.preventDefault();
+                const palette = getPalette();
+                if (palette && palette.classList.contains("is-open")) {
+                  closePalette();
+                } else {
+                  openPalette();
+                }
+                return;
+              }
+
+              if (event.key === "Escape") {
+                closePalette();
+                return;
+              }
+
+              if (event.key === "Enter") {
+                const palette = getPalette();
+                if (!palette || !palette.classList.contains("is-open")) return;
+                const firstVisible = getItems().find((item) => item.style.display !== "none");
+                if (firstVisible) {
+                  event.preventDefault();
+                  firstVisible.click();
+                }
+              }
+            });
+
+            parentWindow.__certainPaletteInit = true;
+          };
+
+          const syncPalette = () => {
+            if (!getPalette()) {
+              parentWindow.setTimeout(syncPalette, 120);
+              return;
+            }
+            attachHandlers();
+            filterItems();
+          };
+
+          syncPalette();
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _mount_page_translation() -> None:
+    widget_code = LANGUAGE_WIDGET_CODES.get(
+        st.session_state.get("saas_language_code", "en"),
+        "en",
+    )
+    included_languages = ",".join(widget_code for _, _, widget_code in LANGUAGE_OPTIONS)
+    components.html(
+        dedent(
+            f"""
+            <script>
+            (() => {{
+              const parentWindow = window.parent;
+              const parentDocument = parentWindow.document;
+              const targetLanguage = "{widget_code}";
+              const includedLanguages = "{included_languages}";
+
+              const ensureContainer = () => {{
+                let container = parentDocument.getElementById("certain_google_translate_element");
+                if (!container) {{
+                  container = parentDocument.createElement("div");
+                  container.id = "certain_google_translate_element";
+                  container.style.display = "none";
+                  parentDocument.body.appendChild(container);
+                }}
+                return container;
+              }};
+
+              const ensureGoogleInit = () => {{
+                if (parentWindow.google?.translate?.TranslateElement && !parentWindow.__certainTranslateWidgetReady) {{
+                  ensureContainer();
+                  new parentWindow.google.translate.TranslateElement(
+                    {{
+                      pageLanguage: "en",
+                      includedLanguages,
+                      autoDisplay: false,
+                      layout: parentWindow.google.translate.TranslateElement.InlineLayout.SIMPLE,
+                    }},
+                    "certain_google_translate_element",
+                  );
+                  parentWindow.__certainTranslateWidgetReady = true;
+                }}
+              }};
+
+              const persistLanguage = () => {{
+                const languagePath = targetLanguage === "en" ? "/auto/en" : `/auto/${{targetLanguage}}`;
+                parentDocument.cookie = `googtrans=${{languagePath}};path=/;SameSite=Lax`;
+                try {{
+                  parentWindow.localStorage.setItem("certain.language", targetLanguage);
+                }} catch (error) {{
+                  // Ignore storage issues in restricted browser contexts.
+                }}
+              }};
+
+              const applyLanguage = () => {{
+                persistLanguage();
+                parentDocument.documentElement.lang = targetLanguage === "en" ? "en" : targetLanguage;
+                const combo = parentDocument.querySelector(".goog-te-combo");
+                if (!combo) return false;
+                combo.value = targetLanguage === "en" ? "" : targetLanguage;
+                combo.dispatchEvent(new parentWindow.Event("change", {{ bubbles: true }}));
+                if (targetLanguage === "en") {{
+                  parentWindow.setTimeout(() => {{
+                    combo.value = "";
+                    combo.dispatchEvent(new parentWindow.Event("change", {{ bubbles: true }}));
+                  }}, 60);
+                }}
+                return true;
+              }};
+
+              const bootTranslation = () => {{
+                ensureGoogleInit();
+                if (applyLanguage()) return;
+                parentWindow.setTimeout(bootTranslation, 180);
+              }};
+
+              if (!parentWindow.__certainTranslateScriptLoaded) {{
+                parentWindow.googleTranslateElementInit = () => {{
+                  parentWindow.__certainTranslateScriptLoaded = true;
+                  bootTranslation();
+                }};
+                const script = parentDocument.createElement("script");
+                script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+                script.async = true;
+                parentDocument.body.appendChild(script);
+                parentWindow.__certainTranslateScriptLoaded = true;
+              }}
+
+              bootTranslation();
+            }})();
+            </script>
+            """
+        ),
+        height=0,
+        width=0,
+    )
+
+
+def _render_ai_assistant(active_page: str) -> None:
+    profile = _assistant_profile(active_page)
+    suggestions_markup = "".join(
+        f'<button type="button" class="ai-assistant-chip" data-ai-suggestion="{suggestion}">{suggestion}</button>'
+        for suggestion in profile["suggestions"]
+    )
+    st.markdown(
+        dedent(
+            f"""
+            <div class="ai-assistant-shell" data-ai-assistant data-ai-page="{active_page}">
+              <div class="ai-assistant-panel" data-ai-assistant-panel aria-hidden="true">
+                <div class="ai-assistant-head">
+                  <div class="ai-assistant-head-copy">
+                    <span class="ai-assistant-kicker">AI Assistant</span>
+                    <strong>{profile["title"]}</strong>
+                    <span>{profile["summary"]}</span>
+                  </div>
+                  <button type="button" class="ai-assistant-close" data-ai-close="true" aria-label="Close AI assistant">×</button>
+                </div>
+                <div class="ai-assistant-suggestions">
+                  {suggestions_markup}
+                </div>
+                <div class="ai-assistant-messages" data-ai-messages></div>
+                <form class="ai-assistant-form" data-ai-form>
+                  <input
+                    class="ai-assistant-input"
+                    type="text"
+                    placeholder="Ask about risks, pricing, forecasting, or next steps"
+                    data-ai-input
+                  />
+                  <button type="submit" class="ai-assistant-send">Send</button>
+                </form>
+              </div>
+              <button type="button" class="ai-assistant-launcher" data-ai-toggle="true" aria-label="Open AI assistant">
+                <span class="ai-assistant-launcher-icon">✦</span>
+                <span class="ai-assistant-launcher-copy">
+                  <strong>AI Assistant</strong>
+                  <span>Ask {_brand_name_html()}</span>
+                </span>
+              </button>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _mount_ai_assistant(active_page: str) -> None:
+    profile_json = json.dumps(_assistant_profile(active_page))
+    active_page_json = json.dumps(active_page)
+    components.html(
+        dedent(
+            f"""
+            <script>
+            (() => {{
+              const parentWindow = window.parent;
+              const parentDocument = parentWindow.document;
+              const profile = {profile_json};
+              const activePage = {active_page_json};
+              const storeKey = "certain.ai.assistant.messages";
+              const openKey = "certain.ai.assistant.open";
+
+              const escapeHtml = (value) =>
+                String(value)
+                  .replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(/>/g, "&gt;")
+                  .replace(/"/g, "&quot;")
+                  .replace(/'/g, "&#39;");
+
+              const getShell = () => parentDocument.querySelector("[data-ai-assistant]");
+              const getPanel = () => parentDocument.querySelector("[data-ai-assistant-panel]");
+              const getMessages = () => parentDocument.querySelector("[data-ai-messages]");
+              const getInput = () => parentDocument.querySelector("[data-ai-input]");
+              const getFooter = () => parentDocument.querySelector(".footer-shell");
+
+              const readMessages = () => {{
+                try {{
+                  return JSON.parse(parentWindow.sessionStorage.getItem(storeKey) || "[]");
+                }} catch (error) {{
+                  return [];
+                }}
+              }};
+
+              const saveMessages = (messages) => {{
+                const trimmed = messages.slice(-14);
+                try {{
+                  parentWindow.sessionStorage.setItem(storeKey, JSON.stringify(trimmed));
+                }} catch (error) {{
+                  // Ignore storage issues in restricted browsers.
+                }}
+              }};
+
+              const introMessage = () =>
+                `Hi, I'm your certAIn AI assistant. You're on ${{profile.title}}. ${{profile.summary}}`;
+
+              const ensureMessages = () => {{
+                const current = readMessages();
+                if (current.length) return current;
+                const seeded = [{{ role: "assistant", text: introMessage() }}];
+                saveMessages(seeded);
+                return seeded;
+              }};
+
+              const renderMessages = () => {{
+                const messages = ensureMessages();
+                const container = getMessages();
+                if (!container) return;
+                container.innerHTML = messages
+                  .map(
+                    (message) =>
+                      `<div class="ai-assistant-message ${{message.role}}"><span>${{escapeHtml(message.text)}}</span></div>`,
+                  )
+                  .join("");
+                container.scrollTop = container.scrollHeight;
+              }};
+
+              const nextStepReply = () => {{
+                if (activePage === "home") {{
+                  return "Start with Product for the platform story, then move to AI Forecasting or Monte Carlo to show the evidence-driven workflow.";
+                }}
+                if (activePage === "pricing") {{
+                  return "Use Pricing to position the trial flow first, then move into the dashboard or simulation pages to demonstrate value.";
+                }}
+                if (activePage === "login") {{
+                  return "From here, the sign-in and register actions move users into the pricing flow before they continue deeper into the platform.";
+                }}
+                if (activePage === "forecasting" || activePage === "monte-carlo") {{
+                  return "Highlight the key metric first, explain how the result supports better commitments, then connect it to dashboard decisions or scenario testing.";
+                }}
+                if (activePage === "about" || activePage === "contact") {{
+                  return "Use this page as a closer: summarize the story, invite the next conversation, and route viewers back into the working product pages if needed.";
+                }}
+                return "Lead with the key signal on this page, explain the decision it supports, and then move to the next workspace or reporting screen.";
+              }};
+
+              const composeReply = (message) => {{
+                const text = message.toLowerCase();
+
+                if (/pricing|plan|trial|enterprise|team/.test(text)) {{
+                  return "The pricing flow is best framed as a guided entry point: start with Team Pilot for smaller evaluations and position Enterprise for broader governance and rollout support.";
+                }}
+
+                if (/forecast|predict|prediction|delay|deadline/.test(text)) {{
+                  return "Forecasting helps explain which signals suggest delay or delivery risk early enough for teams to intervene before commitments slip.";
+                }}
+
+                if (/monte|simulation|probability|confidence/.test(text)) {{
+                  return "Monte Carlo is strongest when you describe it as a range-based planning tool: it shows likely finish windows and confidence levels instead of a single brittle date.";
+                }}
+
+                if (/risk|classifier|score|driver/.test(text)) {{
+                  return "Use the risk views to explain what is driving exposure, which tasks or signals are contributing most, and where mitigation should start first.";
+                }}
+
+                if (/task|plan|dependency|dag|critical path/.test(text)) {{
+                  return "certAIn turns a plain-language brief into structured tasks, dependencies, and critical-path logic so teams can move from idea to defensible plan faster.";
+                }}
+
+                if (/upload|csv|file|import/.test(text)) {{
+                  return "Project Upload is presented as a guided intake experience in the product story, with CSV previewing and broader file support represented in the UI.";
+                }}
+
+                if (/summary|report|executive|stakeholder/.test(text)) {{
+                  return "The reporting flow is meant to translate technical forecast signals into business-ready summaries that stakeholders can review quickly.";
+                }}
+
+                if (/language|translate/.test(text)) {{
+                  return "The platform language can be changed from the language selector, and the selected language is carried across the shared platform pages.";
+                }}
+
+                if (/command|search|cmd\\+k|ctrl\\+k/.test(text)) {{
+                  return "Quick command search is available from the shortcut pill or with Command+K on Mac and Ctrl+K on Windows or Linux.";
+                }}
+
+                if (/what can you do|help|support|assist/.test(text)) {{
+                  return "I can explain the current page, suggest the next best step, summarize product capabilities, and help you present forecasts, risks, Monte Carlo results, pricing, or reporting.";
+                }}
+
+                if (/next|start|where should i begin|what should i do/.test(text)) {{
+                  return nextStepReply();
+                }}
+
+                if (/this page|what is this|where am i|here/.test(text)) {{
+                  return `This is the ${{profile.title}} page. ${{profile.summary}}`;
+                }}
+
+                return `You're on ${{profile.title}}. ${{profile.summary}} Ask me about forecasting, Monte Carlo, pricing, reporting, or the next best step.`;
+              }};
+
+              const updateOpenState = (open, focusInput = false) => {{
+                const shell = getShell();
+                const panel = getPanel();
+                if (!shell || !panel) return;
+                shell.classList.toggle("is-open", open);
+                panel.setAttribute("aria-hidden", open ? "false" : "true");
+                try {{
+                  parentWindow.sessionStorage.setItem(openKey, open ? "1" : "0");
+                }} catch (error) {{
+                  // Ignore storage issues in restricted browsers.
+                }}
+                if (open && focusInput) {{
+                  parentWindow.requestAnimationFrame(() => {{
+                    const input = getInput();
+                    if (input) input.focus();
+                  }});
+                }}
+              }};
+
+              const handlePrompt = (rawMessage) => {{
+                const message = (rawMessage || "").trim();
+                if (!message) return;
+                const messages = ensureMessages();
+                messages.push({{ role: "user", text: message }});
+                messages.push({{ role: "assistant", text: composeReply(message) }});
+                saveMessages(messages);
+                renderMessages();
+                const input = getInput();
+                if (input) {{
+                  input.value = "";
+                  input.focus();
+                }}
+                updateOpenState(true);
+              }};
+
+              const attachHandlers = () => {{
+                if (parentWindow.__certainAssistantInit) return;
+
+                parentDocument.addEventListener("click", (event) => {{
+                  const toggle = event.target.closest("[data-ai-toggle]");
+                  if (toggle) {{
+                    event.preventDefault();
+                    const shell = getShell();
+                    const isOpen = shell?.classList.contains("is-open");
+                    updateOpenState(!isOpen, true);
+                    renderMessages();
+                    return;
+                  }}
+
+                  const closeButton = event.target.closest("[data-ai-close]");
+                  if (closeButton) {{
+                    event.preventDefault();
+                    updateOpenState(false);
+                    return;
+                  }}
+
+                  const suggestion = event.target.closest("[data-ai-suggestion]");
+                  if (suggestion) {{
+                    event.preventDefault();
+                    handlePrompt(suggestion.dataset.aiSuggestion || suggestion.textContent || "");
+                  }}
+                }});
+
+                parentDocument.addEventListener("submit", (event) => {{
+                  if (!event.target.matches("[data-ai-form]")) return;
+                  event.preventDefault();
+                  const input = getInput();
+                  if (!input) return;
+                  handlePrompt(input.value);
+                }});
+
+                parentWindow.__certainAssistantInit = true;
+              }};
+
+              const mountFooterClearance = () => {{
+                const footer = getFooter();
+                if (!footer) {{
+                  parentWindow.setTimeout(mountFooterClearance, 140);
+                  return;
+                }}
+
+                if (parentWindow.__certainFooterObserver) {{
+                  parentWindow.__certainFooterObserver.disconnect();
+                }}
+
+                const observer = new parentWindow.IntersectionObserver(
+                  (entries) => {{
+                    const footerVisible = entries.some(
+                      (entry) => entry.isIntersecting && entry.intersectionRatio > 0.04,
+                    );
+                    parentDocument.body.classList.toggle("footer-visible", footerVisible);
+                  }},
+                  {{
+                    threshold: [0, 0.04, 0.12, 0.24],
+                  }},
+                );
+
+                observer.observe(footer);
+                parentWindow.__certainFooterObserver = observer;
+              }};
+
+              const syncAssistant = () => {{
+                if (!getShell()) {{
+                  parentWindow.setTimeout(syncAssistant, 120);
+                  return;
+                }}
+                attachHandlers();
+                mountFooterClearance();
+                renderMessages();
+                const shouldOpen = parentWindow.sessionStorage.getItem(openKey) === "1";
+                updateOpenState(shouldOpen);
+              }};
+
+              syncAssistant();
+            }})();
+            </script>
+            """
+        ),
+        height=0,
+        width=0,
+    )
 
 
 @st.cache_data
@@ -3048,22 +5711,30 @@ def _svg_data_uri(svg: str) -> str:
     return f"data:image/svg+xml;base64,{encoded}"
 
 
+def _brand_name_html() -> str:
+    return 'cert<span class="ai-gradient">AI</span>n'
+
+
 def _brand_lockup(location: str, caption: str | None = None) -> str:
+    wordmark = f'<span class="brand-word brand-word-inline notranslate" translate="no">{_brand_name_html()}</span>'
     logo_uri = _logo_data_uri()
     if logo_uri:
         media = (
-            '<span class="brand-media">'
+            '<span class="brand-media with-wordmark">'
+            '<span class="brand-logo-shell">'
             f'<img src="{logo_uri}" class="brand-logo" alt="certAIn logo" />'
+            "</span>"
+            f"{wordmark}"
             "</span>"
         )
     else:
         media = (
-            '<span class="brand-media">'
+            '<span class="brand-media with-wordmark">'
             '<span class="brand-mark" aria-hidden="true">'
             '<span class="brand-triangle"></span>'
             '<span class="brand-core">A</span>'
             "</span>"
-            '<span class="brand-word">cert<span class="ai-gradient">AI</span>n</span>'
+            f"{wordmark}"
             "</span>"
         )
 
@@ -3095,7 +5766,7 @@ def _nav_brand_markup() -> str:
     return (
         f'<a class="nav-brand-zone" href="{_href("home")}">'
         f"{media}"
-        '<span class="nav-brand-word">cert<span class="nav-brand-accent">AI</span>n</span>'
+        f'<span class="nav-brand-word notranslate" translate="no">{_brand_name_html()}</span>'
         "</a>"
     )
 
@@ -3121,12 +5792,13 @@ def _footer_brand_markup() -> str:
     return (
         f'<a class="footer-brand-row" href="{_href("home")}">'
         f"{media}"
-        '<span class="footer-brand-wordmark">cert<span class="footer-brand-accent">AI</span>n</span>'
+        f'<span class="footer-brand-wordmark notranslate" translate="no">{_brand_name_html()}</span>'
         "</a>"
     )
 
 
 def _footer_social_icon_markup(platform: str, label: str) -> str:
+    href = _github_profile_href() if platform == "github" else FOOTER_SOCIAL_LINKS.get(platform, "#")
     icons = {
         "linkedin": (
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
@@ -3157,12 +5829,26 @@ def _footer_social_icon_markup(platform: str, label: str) -> str:
             '<path d="M10 15l5-3-5-3z"/>'
             "</svg>"
         ),
+        "instagram": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/>'
+            '<circle cx="12" cy="12" r="4.1"/>'
+            '<circle cx="17.3" cy="6.7" r="0.8" fill="currentColor" stroke="none"/>'
+            "</svg>"
+        ),
+        "facebook": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<path d="M14 8h3V4h-3c-3 0-5 2-5 5v3H6v4h3v4h4v-4h3.2l.8-4H13V9c0-.7.3-1 1-1z"/>'
+            "</svg>"
+        ),
     }
     icon = icons.get(platform, "")
     return (
-        f'<span class="footer-social-pill" aria-label="{label}" title="{label}">'
+        f'<a class="footer-social-pill" href="{href}" target="_blank" rel="noreferrer noopener" aria-label="{label}" title="{label}">'
         f'<span class="footer-social-icon">{icon}</span>'
-        "</span>"
+        "</a>"
     )
 
 
@@ -3230,7 +5916,32 @@ def _inject_styles() -> None:
     st.markdown(
         """
         <div class="saas-shell">
-          <div class="starfield" aria-hidden="true"></div>
+          <div class="particle-network" aria-hidden="true">
+            <div class="particle-group group-a">
+              <span class="particle-link" style="left:42px;top:40px;width:54px;transform:rotate(22deg);"></span>
+              <span class="particle-link" style="left:95px;top:62px;width:62px;transform:rotate(10deg);"></span>
+              <span class="particle-link" style="left:154px;top:73px;width:66px;transform:rotate(8deg);"></span>
+              <span class="particle-node teal" style="left:42px;top:40px;--size:10px;--pulse:4.8s;"></span>
+              <span class="particle-node blue" style="left:94px;top:61px;--size:8px;--pulse:5.7s;--delay:-1.2s;"></span>
+              <span class="particle-node soft" style="left:154px;top:72px;--size:6px;--pulse:6.4s;--delay:-0.8s;"></span>
+              <span class="particle-node soft" style="left:220px;top:82px;--size:5px;--pulse:5.4s;--delay:-2.4s;"></span>
+              <span class="particle-node violet" style="left:244px;top:18px;--size:6px;--pulse:7.1s;--delay:-3s;"></span>
+            </div>
+            <div class="particle-group group-b">
+              <span class="particle-link" style="left:52px;top:108px;width:58px;transform:rotate(-33deg);"></span>
+              <span class="particle-link" style="left:101px;top:75px;width:70px;transform:rotate(29deg);"></span>
+              <span class="particle-node blue" style="left:52px;top:108px;--size:9px;--pulse:5.1s;"></span>
+              <span class="particle-node teal" style="left:100px;top:74px;--size:8px;--pulse:6.2s;--delay:-1.6s;"></span>
+              <span class="particle-node soft" style="left:162px;top:109px;--size:5px;--pulse:5.8s;--delay:-0.9s;"></span>
+              <span class="particle-node soft" style="left:34px;top:152px;--size:4px;--pulse:6.6s;--delay:-2.2s;"></span>
+            </div>
+            <div class="particle-group group-c">
+              <span class="particle-link" style="left:70px;top:72px;width:54px;transform:rotate(-28deg);"></span>
+              <span class="particle-node blue" style="left:70px;top:72px;--size:7px;--pulse:5.3s;"></span>
+              <span class="particle-node violet" style="left:118px;top:46px;--size:5px;--pulse:6.9s;--delay:-1.4s;"></span>
+              <span class="particle-node soft" style="left:152px;top:64px;--size:4px;--pulse:7.4s;--delay:-3.2s;"></span>
+            </div>
+          </div>
           <div class="ambient-orb orb-a"></div>
           <div class="ambient-orb orb-b"></div>
           <div class="ambient-orb orb-c"></div>
@@ -3273,7 +5984,7 @@ def _render_nav(active_page: str) -> None:
                 {nav_links}
               </div>
               <div class="top-nav-meta">
-                <a href="{_href("dashboard")}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
+                <a href="{_trial_href()}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
               </div>
             </div>
             """
@@ -3313,7 +6024,7 @@ def _render_sidebar(active_page: str) -> None:
             """
             <div class="sidebar-divider"></div>
             <div class="sidebar-shortcut-wrap">
-              <div class="mini-pill sidebar-shortcut-pill"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></div>
+              <button type="button" class="mini-pill sidebar-shortcut-pill sidebar-shortcut-trigger" data-command-trigger="true" aria-label="Open quick command search"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></button>
               <div class="sidebar-mini-label sidebar-shortcut-caption">Quick command search</div>
             </div>
             """,
@@ -3347,7 +6058,7 @@ def _render_floating_shortcut(active_page: str) -> None:
     st.markdown(
         """
         <div class="floating-shortcut-wrap">
-          <div class="mini-pill sidebar-shortcut-pill"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></div>
+          <button type="button" class="mini-pill sidebar-shortcut-pill sidebar-shortcut-trigger" data-command-trigger="true" aria-label="Open quick command search"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></button>
           <div class="sidebar-mini-label sidebar-shortcut-caption">Quick command search</div>
         </div>
         """,
@@ -3355,7 +6066,7 @@ def _render_floating_shortcut(active_page: str) -> None:
     )
 
 
-def _render_footer() -> None:
+def _render_footer(active_page: str) -> None:
     globe_icon_uri = _svg_data_uri(
         """
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e8f1ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -3414,29 +6125,42 @@ def _render_footer() -> None:
         </svg>
         """
     )
+    flag_markup_by_code = {
+        "en": f'<img src="{flag_icon_uri}" alt="" />',
+        "fa": f'<img src="{farsi_flag_icon_uri}" alt="" />',
+        "iw": "🇮🇱",
+        "de": "🇩🇪",
+        "it": "🇮🇹",
+        "es": "🇪🇸",
+        "fr": "🇫🇷",
+        "pt": "🇧🇷",
+        "zh-CN": "🇨🇳",
+        "ja": "🇯🇵",
+        "ar": "🇸🇦",
+    }
+    current_language_code = st.session_state.get("saas_language_code", "en")
+    current_language_label = LANGUAGE_LABELS.get(current_language_code, "English")
+    current_flag_markup = flag_markup_by_code.get(current_language_code, f'<img src="{flag_icon_uri}" alt="" />')
+    language_toggle_id = f"footer-language-toggle-{re.sub(r'[^a-z0-9_-]+', '-', active_page.lower())}"
     language_options = [
-        ("English", f'<img src="{flag_icon_uri}" alt="" />', True),
-        ("فارسی", f'<img src="{farsi_flag_icon_uri}" alt="" />', False),
-        ("עברית", "🇮🇱", False),
-        ("Deutsch", "🇩🇪", False),
-        ("Italiano", "🇮🇹", False),
-        ("Español", "🇪🇸", False),
-        ("Français", "🇫🇷", False),
-        ("Português", "🇧🇷", False),
-        ("中文", "🇨🇳", False),
-        ("日本語", "🇯🇵", False),
-        ("العربية", "🇸🇦", False),
+        (
+            code,
+            LANGUAGE_LABELS.get(code, label),
+            flag_markup_by_code.get(code, "🌐"),
+            code == current_language_code,
+        )
+        for code, label, _ in LANGUAGE_OPTIONS
     ]
     language_menu_markup = "".join(
         (
-            '<div class="footer-language-option'
+            f'<a href="{_href(active_page, lang=code)}" class="footer-language-option'
             + (" selected" if selected else "")
             + '">'
             + f'<span class="footer-language-option-flag">{flag_markup}</span>'
             + f"<span>{label}</span>"
-            + "</div>"
+            + "</a>"
         )
-        for label, flag_markup, selected in language_options
+        for code, label, flag_markup, selected in language_options
     )
     link_columns_markup = []
     for title, items in FOOTER_LINK_COLUMNS:
@@ -3444,7 +6168,8 @@ def _render_footer() -> None:
         for label, page, note in items:
             note_markup = f' <span class="footer-link-note">({note})</span>' if note else ""
             if page:
-                item_markup.append(f'<a href="{_href(page)}">{label}{note_markup}</a>')
+                link_class = "footer-link-item footer-legal-link" if title == "Legal" else "footer-link-item"
+                item_markup.append(f'<a class="{link_class}" href="{_href(page)}">{label}{note_markup}</a>')
             else:
                 item_markup.append(f'<span class="footer-static-link">{label}{note_markup}</span>')
         link_columns_markup.append(
@@ -3487,7 +6212,7 @@ def _render_footer() -> None:
                     </a>
                     <div class="footer-contact-row">
                       <span class="footer-contact-icon">⌖</span>
-                      <span>San Francisco, CA</span>
+                      <span>Beverly Hills, CA</span>
                     </div>
                   </div>
                   <div class="footer-social-row">{social_markup}</div>
@@ -3498,31 +6223,44 @@ def _render_footer() -> None:
                 <div class="footer-newsletter">
                   <h4>Stay up to date</h4>
                   <p>Get the latest on AI-powered project management.</p>
-                  <div class="footer-subscribe-row">
-                    <div class="footer-input-shell">Enter your email</div>
-                    <a href="{_href("contact")}" class="btn btn-primary btn-outline-cta footer-subscribe-btn">Subscribe</a>
-                  </div>
+                  <form class="footer-subscribe-row" method="get" action="">
+                    <input type="hidden" name="page" value="subscription-confirmation" />
+                    <input type="hidden" name="lang" value="{st.session_state.get("saas_language_code", "en")}" />
+                    <input
+                      class="footer-input-shell"
+                      type="email"
+                      name="newsletter_email"
+                      placeholder="Enter your email"
+                      autocomplete="email"
+                    />
+                    <button type="submit" class="btn btn-primary btn-outline-cta footer-subscribe-btn">Subscribe</button>
+                  </form>
                 </div>
                 <div class="footer-compliance-row">{compliance_markup}</div>
               </div>
               <div class="footer-bottom-row">
-                <span>&copy; 2026 certAIn. All rights reserved.</span>
+                <span>&copy; 2026 {_brand_name_html()}. All rights reserved.</span>
                 <div class="footer-language-shell">
                   <span class="footer-language-globe" aria-hidden="true">
                     <img src="{globe_icon_uri}" alt="" />
                   </span>
-                  <details class="footer-language-dropdown">
-                    <summary class="footer-language-pill">
+                  <div class="footer-language-dropdown">
+                    <input id="{language_toggle_id}" class="footer-language-toggle" type="checkbox" />
+                    <label class="footer-language-pill" for="{language_toggle_id}">
                       <span class="footer-language-flag" aria-hidden="true">
-                        <img src="{flag_icon_uri}" alt="" />
+                        {current_flag_markup}
                       </span>
-                      <span>English</span>
-                      <span class="footer-language-caret">▾</span>
-                    </summary>
+                      <span>{current_language_label}</span>
+                      <span class="footer-language-caret" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M4 6.5L8 10L12 6.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </span>
+                    </label>
                     <div class="footer-language-menu">
                       {language_menu_markup}
                     </div>
-                  </details>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3665,8 +6403,18 @@ def _init_state() -> None:
         "saas_email_alerts": True,
         "saas_in_app_alerts": True,
         "saas_ai_alerts": True,
+        "saas_language_code": "en",
         "saas_language": "English",
         "saas_region": "Global",
+        "contact_email": "",
+        "registration_email": "",
+        "newsletter_last_request_key": "",
+        "newsletter_delivery_status": "",
+        "newsletter_delivery_message": "",
+        "newsletter_confirmed": False,
+        "registration_last_request_key": "",
+        "registration_delivery_status": "",
+        "registration_delivery_message": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -3997,7 +6745,7 @@ def _render_home() -> None:
                           <span class="home-chart-bar" style="height:14px;"></span>
                         </div>
                         <div class="home-chart-axis"></div>
-                        <div class="home-chart-caption">P50: March 15 · P80: March 22</div>
+                        <div class="home-chart-caption">P50: May 15 · P80: May 22</div>
                       </div>
                     </div>
                     <div class="home-preview-card">
@@ -4076,7 +6824,7 @@ def _render_home() -> None:
                     </div>
                     <h2 class="home-intelligence-title">Intelligence at Every Level</h2>
                     <p class="home-intelligence-copy">
-                      From task planning to executive reporting — certAIn covers the entire project lifecycle.
+                      From task planning to executive reporting — {_brand_name_html()} covers the entire project lifecycle.
                     </p>
                   </div>
                   <div class="home-intelligence-grid">
@@ -4125,11 +6873,11 @@ def _render_home() -> None:
         "These signals are designed to make the product story immediately legible before you move into the live dashboard.",
     )
     st.markdown(
-        """
+        f"""
         <div class="home-testimonial-shell">
           <div class="home-testimonial-grid">
             <div class="home-testimonial-card">
-              <p class="home-testimonial-quote">"certAIn reduced our project overruns by 40%. The Monte Carlo simulations gave us confidence we never had before."</p>
+              <p class="home-testimonial-quote">"{_brand_name_html()} reduced our project overruns by 40%. The Monte Carlo simulations gave us confidence we never had before."</p>
               <div class="home-testimonial-author">
                 <strong>Sarah Chen</strong>
                 <span>VP Engineering, TechCorp</span>
@@ -4164,7 +6912,7 @@ def _render_home() -> None:
               </div>
               <h2 class="home-cta-title">Ready to predict your project's future?</h2>
               <p class="home-cta-copy">Start forecasting with AI in minutes. No credit card required.</p>
-              <a href="{_href("dashboard")}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
+              <a href="{_trial_href()}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
             </div>
             """
         ),
@@ -4182,7 +6930,7 @@ def _render_product() -> None:
                   <span class="kicker">Product</span>
                   <h1 class="page-title">Plan, forecast, and explain risk from one workflow.</h1>
                   <p class="page-copy">
-                    certAIn connects project intake, dependency modeling, simulation, advisory ML, and scenario comparison
+                    {_brand_name_html()} connects project intake, dependency modeling, simulation, advisory ML, and scenario comparison
                     in one SaaS-style interface.
                   </p>
                   <div class="cta-row">
@@ -4471,7 +7219,7 @@ def _render_pricing() -> None:
                 <h3>Team Pilot</h3>
                 <p>For delivery teams validating risk-aware commitments before launch.</p>
                 <p>AI planning, Monte Carlo simulation, scenario comparison, and executive reporting.</p>
-                <a href="{_href("login")}" class="btn btn-primary btn-outline-cta">Start Trial</a>
+                <a href="{_trial_href()}" class="btn btn-primary btn-outline-cta">Start Trial</a>
               </div>
               <div class="pricing-card">
                 <span class="pricing-tag">Enterprise</span>
@@ -4488,24 +7236,146 @@ def _render_pricing() -> None:
 
 
 def _render_about() -> None:
+    values = [
+        ("Innovation First", "We push the boundaries of what AI can do for project management.", "Innovation"),
+        ("Trust & Security", "Enterprise-grade security and compliance are non-negotiable.", "Security"),
+        ("Customer Obsession", "Every feature is driven by real feedback from project teams.", "Customer"),
+        ("Global Perspective", "Built for teams of every size, across every continent.", "Global"),
+    ]
+    journey = [
+        (
+            "2026",
+            "Idea & Foundation",
+            "certAIn began from a clearly defined idea to bring probabilistic, AI-driven decision support into project planning. The initial phase focused on exploring how uncertainty, dependencies, and risk could be modeled more realistically.",
+            "left",
+        ),
+        (
+            "2026",
+            "Method & Architecture",
+            "The system approach was shaped through exploration of key methodologies, including machine learning, DAG-based dependency modeling, and Monte Carlo simulation, leading to a unified architecture connecting planning, forecasting, and monitoring.",
+            "right",
+        ),
+        (
+            "2026",
+            "Data Strategy & Modeling",
+            "Synthetic datasets were designed and generated to simulate realistic project conditions, followed by development and evaluation of machine learning models for risk prediction.",
+            "left",
+        ),
+        (
+            "2026",
+            "Forecasting Engine",
+            "A DAG-based Monte Carlo forecasting engine was implemented to simulate task-level uncertainty, identify the critical path, and generate P50/P80 delivery estimates.",
+            "right",
+        ),
+        (
+            "2026",
+            "End-to-End System",
+            "The full workflow was structured across notebooks, covering data analysis, modeling, forecasting, and monitoring, resulting in a reproducible and scalable pipeline.",
+            "left",
+        ),
+        (
+            "2026",
+            "Product & Experience",
+            "The system was translated into an interactive prototype, and consolidated into a clear product narrative aligned with user value and decision-making support.",
+            "right",
+        ),
+    ]
+    team_members = [
+        (
+            "Eng. Meysameh Shojaei",
+            "CEO & Co-founder",
+            "IT Engineer & AI Project Manager specialist. Senior VP at Apple Co., Senior IT Specialist & Project Manager at the White House.",
+            "MS",
+        ),
+        (
+            "Eng. Santiago Molina",
+            "COO & Co-founder",
+            "Industrial Engineer & AI Project Manager specializing in IT products and AI research. Senior VP Worldwide Operations at Anthropic and Executive VP of Sales and Marketing at Google.",
+            "SM",
+        ),
+        (
+            "James Park",
+            "CTO",
+            "Ex-Microsoft engineer specializing in ML infrastructure and simulation systems.",
+            "JP",
+        ),
+        (
+            "Maria Smith",
+            "CFO",
+            "Former Deloitte partner with 18 years in corporate finance and scaling tech ventures. Specialized in financial modeling, fundraising strategy, and operational efficiency for AI and SaaS companies.",
+            "MS",
+        ),
+        (
+            "Dr. Lisa Schmidt",
+            "Head of AI",
+            "PhD in Operations Research. Led predictive analytics teams at Siemens.",
+            "LS",
+        ),
+        (
+            "David Chen",
+            "Head of Product",
+            "Previously built project management tools at Atlassian and Asana.",
+            "DC",
+        ),
+    ]
+    brand_name = "certAIn"
+    logo_uri = _logo_data_uri()
+    logo_markup = (
+        f'<img src="{logo_uri}" alt="certAIn logo" />'
+        if logo_uri
+        else '<div class="brand-mark" aria-hidden="true">AI</div>'
+    )
     st.markdown(
-        """
-        <div class="page-shell">
-          <div class="page-grid">
-            <div class="glass page-hero-card">
-              <span class="kicker">About Us</span>
-              <h1 class="page-title">certAIn started as a capstone and evolved into a product story.</h1>
-              <p class="page-copy">
-                The core question was simple: can teams move from a plain-language brief to a defensible,
-                risk-aware commitment in a single planning session?
+        f"""
+        <div class="about-proto-shell">
+          <div class="about-top-stage">
+            <div class="about-proto-hero">
+              <div class="about-proto-logo-shell">
+                {logo_markup}
+              </div>
+              <h1 class="about-proto-title">About {_brand_name_html()}</h1>
+              <p class="about-proto-subtitle">
+                We're building the future of project intelligence — where AI helps teams deliver on time, every time.
               </p>
             </div>
-            <div class="glass page-hero-card">
-              <span class="eyebrow">What it demonstrates</span>
-              <div class="data-pair"><span>Business framing</span><strong>Clear questions</strong></div>
-              <div class="data-pair"><span>Technical rigor</span><strong>EDA + modeling</strong></div>
-              <div class="data-pair"><span>Decision support</span><strong>Scenarios + exports</strong></div>
-              <div class="data-pair"><span>Presentation quality</span><strong>Demo-ready</strong></div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.write("")
+    st.markdown(
+        """
+        <div class="about-top-stage">
+          <div class="about-mv-grid">
+            <div class="about-mv-card">
+              <div class="about-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="8"></circle>
+                  <circle cx="12" cy="12" r="4"></circle>
+                  <circle cx="12" cy="12" r="1.3"></circle>
+                </svg>
+              </div>
+              <h3>Our Mission</h3>
+              <p>
+                To eliminate project failure by giving every team access to AI-powered forecasting and risk intelligence.
+                We believe that project delays are predictable — and preventable — when teams have the right data at the
+                right time.
+              </p>
+            </div>
+            <div class="about-mv-card">
+              <div class="about-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path>
+                  <circle cx="12" cy="12" r="2.8"></circle>
+                </svg>
+              </div>
+              <h3>Our Vision</h3>
+              <p>
+                A world where every project plan comes with a probability of success. Where project managers can
+                confidently tell stakeholders not just when a project will finish — but how certain they are about it.
+              </p>
             </div>
           </div>
         </div>
@@ -4513,51 +7383,157 @@ def _render_about() -> None:
         unsafe_allow_html=True,
     )
 
-    _section_intro(
-        "Why this format works",
-        "The app tells the story your coach wants to see",
-        "It bridges business questions, technical modeling, monitoring, deployment, and a live dashboard in one coherent product narrative.",
-    )
-
+    st.write("")
     st.markdown(
         """
-        <div class="detail-grid">
-          <div class="detail-card">
-            <h3>Business question</h3>
-            <p>How likely is the plan to miss the target date, and what safer commitment should be made?</p>
+        <div class="about-values-section">
+          <div class="about-values-pill">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v4"></path>
+              <path d="M12 17v4"></path>
+              <path d="M4.93 4.93l2.83 2.83"></path>
+              <path d="M16.24 16.24l2.83 2.83"></path>
+              <path d="M3 12h4"></path>
+              <path d="M17 12h4"></path>
+              <path d="M4.93 19.07l2.83-2.83"></path>
+              <path d="M16.24 7.76l2.83-2.83"></path>
+            </svg>
+            <span>What Drives Us</span>
           </div>
-          <div class="detail-card">
-            <h3>Technical core</h3>
-            <p>DAG modeling, Monte Carlo simulation, critical-path analysis, and advisory ML risk scoring.</p>
-          </div>
-          <div class="detail-card">
-            <h3>Presentation outcome</h3>
-            <p>A polished capstone product that feels like a SaaS platform rather than a notebook handoff.</p>
+          <h2 class="about-section-heading">Our Core Values</h2>
+          <div class="about-values-grid">
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M13 2L4 14h7l-1 8 10-13h-7l0-7z"></path>
+                </svg>
+              </div>
+              <h3>Innovation First</h3>
+              <p>We push the boundaries of what AI can do for project management.</p>
+            </div>
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 3l7 4v5c0 5-3.5 8.5-7 9-3.5-.5-7-4-7-9V7l7-4z"></path>
+                </svg>
+              </div>
+              <h3>Trust &amp; Security</h3>
+              <p>Enterprise-grade security and compliance are non-negotiable.</p>
+            </div>
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.53A4 4 0 0 1 19 11c0 5.65-7 10-7 10z"></path>
+                </svg>
+              </div>
+              <h3>Customer Obsession</h3>
+              <p>Every feature is driven by real feedback from project teams.</p>
+            </div>
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="9"></circle>
+                  <path d="M3 12h18"></path>
+                  <path d="M12 3a15 15 0 0 1 0 18"></path>
+                  <path d="M12 3a15 15 0 0 0 0 18"></path>
+                </svg>
+              </div>
+              <h3>Global Perspective</h3>
+              <p>Built for teams of every size, across every continent.</p>
+            </div>
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    st.write("")
+    st.markdown(
+        """
+        <div class="about-journey-section" style="margin-bottom: 2.2rem;">
+          <h2 class="about-section-heading">Transforming an initial idea into a risk-aware <span class="ai-gradient">AI</span> planning platform</h2>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    for year, title, copy, side in journey:
+        left_col, center_col, right_col = st.columns([1.35, 0.22, 1.35], gap="small")
+        if side == "left":
+            target_col, empty_col = left_col, right_col
+        else:
+            target_col, empty_col = right_col, left_col
+
+        with target_col:
+            st.markdown(
+                f'<span class="about-timeline-year ai-gradient">{html.escape(year)}</span>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<h3 class="about-journey-step-title"><span class="ai-gradient">{html.escape(title)}</span></h3>',
+                unsafe_allow_html=True,
+            )
+            st.write(copy)
+
+        with center_col:
+            st.markdown("### •")
+
+        with empty_col:
+            st.write("")
+
+    st.write("")
+    st.subheader("Leadership Team")
+    for row_start in range(0, len(team_members), 3):
+        member_columns = st.columns(3, gap="large")
+        for column, (name, role, bio, initials) in zip(member_columns, team_members[row_start : row_start + 3], strict=True):
+            with column:
+                st.markdown(f"**{initials}**")
+                st.markdown(f"#### {name}")
+                st.caption(role)
+                st.write(bio)
+
+    st.write("")
+    cta_left, cta_center, cta_right = st.columns([1, 1.8, 1], gap="large")
+    with cta_center:
+        st.subheader("Ready to Transform Your Projects?")
+        st.write(
+            f"Join 500+ enterprise teams already using {brand_name} to deliver projects with AI-powered certainty."
+        )
+        if st.button("Contact Sales", key="about_contact_sales_button", type="primary", use_container_width=True):
+            _set_query_page("contact")
+            st.rerun()
 
 
 def _render_contact() -> None:
+    contact_social_markup = "".join(
+        _footer_social_icon_markup(platform, label)
+        for platform, label in FOOTER_SOCIALS
+    )
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
           <div class="page-grid">
             <div class="glass page-hero-card">
               <span class="kicker">Contact Us</span>
-              <h1 class="page-title">Talk to the team behind cert<span class="ai-gradient">AI</span>n.</h1>
+              <h1 class="page-title">Talk to the team behind {_brand_name_html()}.</h1>
               <p class="page-copy">
                 Book a demo, discuss enterprise rollout, or use this page in your capstone presentation to show a production-style contact journey.
               </p>
+              <p class="page-copy">
+                If you cannot find the answer to your question in the <a href="{_href("faq")}" class="auth-inline-link">FAQ</a>, please submit your inquiry using the contact form below.
+              </p>
             </div>
-            <div class="glass page-hero-card">
-              <span class="eyebrow">Direct lines</span>
-              <div class="data-pair"><span>Email</span><strong>hello@certain.ai</strong></div>
-              <div class="data-pair"><span>Phone</span><strong>+49 30 5555 2040</strong></div>
-              <div class="data-pair"><span>Sales</span><strong>enterprise@certain.ai</strong></div>
-              <div class="data-pair"><span>Support SLA</span><strong>&lt; 2 business hours</strong></div>
+            <div class="contact-top-stack">
+              <div class="glass page-hero-card">
+                <div class="data-pair"><span>Email</span><strong><a href="mailto:info@certain-pm.com">info@certain-pm.com</a></strong></div>
+                <div class="data-pair"><span>Phone</span><strong><a href="tel:+13105552040">+1 (310) 555-2040</a></strong></div>
+                <div class="data-pair"><span>Sales</span><strong><a href="mailto:enterprise@certain.ai.com">enterprise@certain.ai.com</a></strong></div>
+                <div class="data-pair"><span>Support</span><strong><a href="mailto:support@certain-pm.com">support@certain-pm.com</a></strong></div>
+              </div>
+              <div class="glass page-hero-card">
+                <span class="eyebrow">Global HQ</span>
+                <h3>Beverly Hills</h3>
+                <p>Rodeo Drive<br/><br/>300 Rodeo Dr<br/>Beverly Hills 90210<br/>CA, USA</p>
+              </div>
             </div>
           </div>
         </div>
@@ -4578,63 +7554,107 @@ def _render_contact() -> None:
                 st.success("Your request has been captured for the demo flow.")
     with right:
         st.markdown(
-            """
-            <div class="feature-grid">
-              <div class="feature-card">
-                <span class="eyebrow">Berlin HQ</span>
-                <h3>Alexanderplatz 8</h3>
-                <p>10178 Berlin<br/>Germany</p>
+            f"""
+            <div class="contact-right-balance">
+                <div class="feature-grid">
+                <div class="feature-card">
+                  <span class="eyebrow">Tehran</span>
+                  <h3>Niavaran Square</h3>
+                  <p>20 Niavaran<br/>Tehran 19789<br/>Tehran, Iran</p>
+                </div>
+                <div class="feature-card">
+                  <span class="eyebrow">Tel Aviv</span>
+                  <h3>Rothschild Blvd</h3>
+                  <p>50 Rothschild Blvd<br/>Tel Aviv 6688125<br/>Tel Aviv District, Israel</p>
+                </div>
+                <div class="feature-card">
+                  <span class="eyebrow">New York</span>
+                  <h3>Manhattan</h3>
+                  <p>725 5th Ave<br/>New York 10022<br/>NY, USA</p>
+                </div>
               </div>
-              <div class="feature-card">
-                <span class="eyebrow">London</span>
-                <h3>Canary Wharf</h3>
-                <p>25 Bank Street<br/>London E14</p>
-              </div>
-              <div class="feature-card">
-                <span class="eyebrow">New York</span>
-                <h3>Hudson Yards</h3>
-                <p>10th Avenue<br/>New York, NY</p>
+              <div class="contact-social-inline">
+                <strong>Connect with us</strong>
+                <div class="footer-social-row">{contact_social_markup}</div>
+                <p>LinkedIn · X · GitHub · YouTube · Instagram · Facebook</p>
               </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        st.markdown(
-            """
-            <div class="history-card" style="margin-top:1rem;">
-              <strong style="font-family:Sora,sans-serif;">Social</strong>
-              <p>LinkedIn · X · GitHub · YouTube</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
-    with st.expander("Can certAIn connect to Jira, Asana, and MS Project?"):
-        st.write("Yes. The Tools Integration page includes those connectors in the SaaS story.")
-    with st.expander("Does the platform support executive reporting?"):
-        st.write("Yes. Executive Summary and Decision Hub are designed for stakeholder-ready communication.")
-    with st.expander("Can the AI model be monitored after deployment?"):
-        st.write("Yes. The dashboard reads `risk_monitoring_snapshot.csv` to visualize monitoring drift and confidence.")
+def _render_faq() -> None:
+    left_questions = [
+        (
+            "Can certAIn connect to Jira, Asana, and MS Project?",
+            "Yes. The Tools Integration page includes those connectors in the SaaS story.",
+        ),
+        (
+            "Does the platform support executive reporting?",
+            "Yes. Executive Summary and Decision Hub are designed for stakeholder-ready communication.",
+        ),
+        (
+            "Can the AI model be monitored after deployment?",
+            "Yes. The dashboard reads `risk_monitoring_snapshot.csv` to visualize monitoring drift and confidence.",
+        ),
+        (
+            "Is certAIn limited to one industry?",
+            "No. The platform flow is designed to be generalizable across project domains, while the bundled advisory model is just one current demonstration model.",
+        ),
+        (
+            "What makes the forecasts credible?",
+            "The app combines dependency-aware task graphs, Monte Carlo simulation, and risk signals so teams can discuss ranges and confidence levels instead of a single optimistic date.",
+        ),
+    ]
+    middle_questions = [
+        (
+            "Can users upload project files in this demo?",
+            "Yes. The Project Upload page shows the intake flow and previews CSV content in the current prototype experience.",
+        ),
+        (
+            "Can certAIn compare multiple delivery scenarios?",
+            "Yes. The What-If Scenarios page is designed to compare mitigation and acceleration options before teams commit to a plan.",
+        ),
+        (
+            "Does the platform include a guided workspace experience?",
+            "Yes. The dashboard modules walk users through planning, risk analysis, simulation, scenario review, and executive reporting.",
+        ),
+        (
+            "Can results be shared with stakeholders?",
+            "Yes. The platform includes executive-ready summaries, charts, and export-oriented flows to support stakeholder conversations.",
+        ),
+        (
+            "Can certAIn help explain project risk to non-technical audiences?",
+            "Yes. The platform is designed to turn simulation outputs, delay drivers, and confidence ranges into language that sponsors and stakeholders can understand quickly.",
+        ),
+    ]
+    right_questions = [
+        (
+            "Why should project managers choose certAIn over traditional planning tools?",
+            "certAIn brings AI task generation, dependency-aware planning, Monte Carlo forecasting, scenario comparison, and executive-ready reporting into one connected workflow. Instead of forcing PMs to switch between separate tools for planning, analysis, and stakeholder communication, certAIn helps teams move from project setup to risk-aware decision-making in one platform.",
+        ),
+        (
+            "What do the Monte Carlo P50 and P80 completion bars mean?",
+            "P50 is the date with a 50% chance of completion, while P80 is the more conservative date with an 80% chance of completion.",
+        ),
+    ]
 
-
-def _render_login() -> None:
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
-          <div class="dashboard-hero-grid">
-            <div class="glass login-panel">
-              <span class="kicker">Login</span>
-              <h1 class="page-title">Access the forecast console</h1>
+          <div class="page-grid">
+            <div class="glass page-hero-card">
+              <span class="kicker">FAQ</span>
+              <h1 class="page-title">Answers to the questions people ask during the {_brand_name_html()} walkthrough.</h1>
               <p class="page-copy">
-                This is a mock SaaS login experience for the capstone. It keeps the product flow believable
-                while routing users directly into the live dashboard.
+                Use this page to explain the product story, platform scope, and the evidence behind the forecasting workflow without leaving the demo.
               </p>
             </div>
-            <div class="glass login-panel">
-              <span class="eyebrow">What happens next</span>
-              <div class="data-pair"><span>Workspace loaded</span><strong>Live demo dashboard</strong></div>
-              <div class="data-pair"><span>Default mode</span><strong>Mock-friendly</strong></div>
-              <div class="data-pair"><span>Presentation use</span><strong>Click-through flow</strong></div>
+            <div class="glass page-hero-card faq-summary-card">
+              <div class="data-pair"><span>Audience</span><strong>Project &amp; Product Managers, PMOs, Decision-Makers</strong></div>
+              <div class="data-pair"><span>Focus</span><strong>AI-driven planning, dependency modeling, risk forecasting, decision support</strong></div>
+              <div class="data-pair"><span>Coverage</span><strong>End-to-end workflow: planning → simulation → monitoring → iteration</strong></div>
+              <div class="data-pair"><span>Format</span><strong>Clear, actionable, presentation-ready insights</strong></div>
             </div>
           </div>
         </div>
@@ -4642,27 +7662,308 @@ def _render_login() -> None:
         unsafe_allow_html=True,
     )
 
-    left, right = st.columns([1.05, 0.95], gap="large")
-    with left:
-        email = st.text_input("Work email", value=st.session_state.saas_user_email, key="login_email")
-        password = st.text_input("Password", value="demo-password", type="password", key="login_password")
-        if st.button("Continue to Dashboard", type="primary", use_container_width=True):
-            st.session_state.saas_user_email = email
-            _set_query_page("dashboard")
-            st.rerun()
-    with right:
-        st.markdown(
-            """
-            <div class="history-card">
-              <strong style="font-family:Sora,sans-serif;">Why keep this page?</strong>
-              <p>
-                It makes the app feel like a real SaaS entry point during presentations and gives the
-                navigation a complete product arc from landing page to dashboard.
-              </p>
+    left_col, middle_col, right_col = st.columns(3, gap="large")
+    with left_col:
+        for question, answer in left_questions:
+            with st.expander(question):
+                st.write(answer)
+
+    with middle_col:
+        for question, answer in middle_questions:
+            with st.expander(question):
+                st.write(answer)
+
+    with right_col:
+        for question, answer in right_questions:
+            with st.expander(question):
+                st.write(answer)
+        for _ in range(3):
+            st.markdown('<div class="faq-empty-box"></div>', unsafe_allow_html=True)
+
+
+def _render_legal_page(page: str) -> None:
+    legal_pages: dict[str, dict[str, str]] = {
+        "privacy-policy": {
+            "kicker": "Privacy Policy",
+            "title": "How certAIn handles personal and project-related information.",
+            "intro": "This demo page represents the privacy layer of the platform and explains how contact details, project inputs, and workflow signals would be handled in a production-style environment.",
+            "scope": "Data scope",
+            "scope_value": "Contact details, workspace inputs, and planning metadata",
+            "purpose": "Use of data",
+            "purpose_value": "Platform access, forecasting workflows, and product communication",
+            "control": "User controls",
+            "control_value": "Review, update, or request removal through support channels",
+            "note": "Presentation note",
+            "note_value": "Shown here as a product-trust page for the capstone platform",
+        },
+        "terms-of-service": {
+            "kicker": "Terms of Service",
+            "title": "The product-use terms that frame access to certAIn.",
+            "intro": "This page presents the platform terms at a product-story level, including acceptable use, trial access, and expectations around evaluation or enterprise rollout conversations.",
+            "scope": "Applies to",
+            "scope_value": "Trial users, team pilots, and enterprise evaluations",
+            "purpose": "Use of platform",
+            "purpose_value": "Project planning, forecasting, simulation, and reporting workflows",
+            "control": "Account expectations",
+            "control_value": "Responsible access, protected credentials, and lawful use",
+            "note": "Presentation note",
+            "note_value": "Structured as a SaaS trust page within the demo experience",
+        },
+        "cookie-settings": {
+            "kicker": "Cookie Settings",
+            "title": "How browser preferences and consent controls would be managed.",
+            "intro": "This page represents the preferences layer for analytics, language persistence, and session experience in a production-style product environment.",
+            "scope": "Preference areas",
+            "scope_value": "Language, session continuity, analytics, and UI preferences",
+            "purpose": "Primary use",
+            "purpose_value": "Improve navigation, remember settings, and support product insights",
+            "control": "User controls",
+            "control_value": "Adjustable through browser and in-product preference settings",
+            "note": "Presentation note",
+            "note_value": "Included to make the platform footer feel complete and credible",
+        },
+        "security-data-protection": {
+            "kicker": "Security & Data Protection",
+            "title": "How certAIn frames security, privacy, and data protection.",
+            "intro": "This page summarizes the product's trust posture, including access controls, monitoring, compliance framing, and enterprise-style data protection expectations.",
+            "scope": "Security focus",
+            "scope_value": "Access control, monitoring, privacy, and controlled sharing",
+            "purpose": "Protection model",
+            "purpose_value": "Safeguard user data, project context, and reporting outputs",
+            "control": "Trust signals",
+            "control_value": "Compliance badges, secure flows, and privacy-forward design",
+            "note": "Presentation note",
+            "note_value": "Supports the trust and enterprise-readiness story of the platform",
+        },
+    }
+
+    content = legal_pages.get(page)
+    if not content:
+        _render_dashboard()
+        return
+
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell">
+              <div class="page-grid">
+                <div class="glass page-hero-card">
+                  <span class="kicker">{content["kicker"]}</span>
+                  <h1 class="page-title">{content["title"]}</h1>
+                  <p class="page-copy">
+                    {content["intro"]}
+                  </p>
+                  <div style="margin-top:1.25rem; display:flex; gap:0.9rem; flex-wrap:wrap;">
+                    <a href="{_href("home")}" class="btn btn-primary">Back to Home</a>
+                    <a href="{_href("contact")}" class="btn btn-secondary">Contact Us</a>
+                  </div>
+                </div>
+                <div class="glass page-hero-card">
+                  <div class="data-pair"><span>{content["scope"]}</span><strong>{content["scope_value"]}</strong></div>
+                  <div class="data-pair"><span>{content["purpose"]}</span><strong>{content["purpose_value"]}</strong></div>
+                  <div class="data-pair"><span>{content["control"]}</span><strong>{content["control_value"]}</strong></div>
+                  <div class="data-pair"><span>{content["note"]}</span><strong>{content["note_value"]}</strong></div>
+                </div>
+              </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_subscription_confirmation() -> None:
+    subscribed_email = st.session_state.get("contact_email", "").strip()
+    safe_email = html.escape(subscribed_email)
+    confirmed = bool(st.session_state.get("newsletter_confirmed"))
+    delivery_status = st.session_state.get("newsletter_delivery_status", "")
+    delivery_message = html.escape(st.session_state.get("newsletter_delivery_message", "").strip())
+
+    if confirmed:
+        title = "Subscription confirmed."
+        intro = (
+            f"<strong>{safe_email}</strong> is now confirmed for certAIn updates."
+            if subscribed_email
+            else "Your subscription is now confirmed."
         )
+        status_pairs = [
+            ("Status", "Confirmed"),
+            ("Updates", "Product and release news"),
+            ("Flow", "Email confirmation completed"),
+        ]
+    else:
+        title = "Check your email to confirm the subscription."
+        if delivery_status == "sent":
+            intro = delivery_message
+        elif delivery_status == "disabled":
+            intro = (
+                "Email delivery is not configured yet, so the app could not send the confirmation message."
+            )
+        elif delivery_status == "error":
+            intro = delivery_message or "We could not send the confirmation email right now."
+        else:
+            intro = (
+                f"We are preparing the confirmation email for <strong>{safe_email}</strong>."
+                if subscribed_email
+                else "We are preparing your confirmation email."
+            )
+        status_pairs = [
+            ("Confirmation", "Email verification"),
+            ("Updates", "Product and release news"),
+            ("Flow", "Footer subscribe experience"),
+        ]
+
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell">
+              <div class="page-grid">
+                <div class="glass page-hero-card">
+                  <span class="kicker">Newsletter</span>
+                  <h1 class="page-title">{title}</h1>
+                  <p class="page-copy">
+                    {intro}
+                  </p>
+                  <div style="margin-top:1.25rem; display:flex; gap:0.9rem; flex-wrap:wrap;">
+                    <a href="{_href("home")}" class="btn btn-primary">Back to Home</a>
+                    <a href="{_href("product")}" class="btn btn-secondary">Explore Product</a>
+                  </div>
+                </div>
+                <div class="glass page-hero-card">
+                  <span class="eyebrow">What happens next</span>
+                  {"".join(f'<div class="data-pair"><span>{label}</span><strong>{value}</strong></div>' for label, value in status_pairs)}
+                </div>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_registration_confirmation() -> None:
+    registered_email = st.session_state.get("registration_email", "").strip()
+    safe_email = html.escape(registered_email)
+    delivery_status = st.session_state.get("registration_delivery_status", "")
+    delivery_message = html.escape(st.session_state.get("registration_delivery_message", "").strip())
+    email_status = "Confirmation email sent" if delivery_status == "sent" else "Email delivery pending"
+
+    if delivery_status == "sent":
+        intro = delivery_message
+    elif delivery_status == "disabled":
+        intro = "Your registration has been confirmed, but the confirmation email could not be sent yet."
+    elif delivery_status == "error":
+        intro = delivery_message or "Your registration has been confirmed, but the confirmation email could not be sent right now."
+    else:
+        intro = (
+            f"<strong>{safe_email}</strong> is now registered with certAIn."
+            if registered_email
+            else "Your certAIn registration is complete."
+        )
+
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell">
+              <div class="page-grid">
+                <div class="glass page-hero-card">
+                  <span class="kicker">Registration</span>
+                  <h1 class="page-title">Your registration has been confirmed.</h1>
+                  <p class="page-copy">
+                    {intro}
+                  </p>
+                  <div style="margin-top:1.25rem; display:flex; gap:0.9rem; flex-wrap:wrap;">
+                    <a href="{_href("pricing")}" class="btn btn-primary">Continue to Pricing</a>
+                    <a href="{_href("dashboard")}" class="btn btn-secondary">Open Dashboard</a>
+                  </div>
+                </div>
+                <div class="glass page-hero-card">
+                  <span class="eyebrow">What happens next</span>
+                  <div class="data-pair"><span>Status</span><strong>Registration complete</strong></div>
+                  <div class="data-pair"><span>Email</span><strong>{safe_email or "Stored for this session"}</strong></div>
+                  <div class="data-pair"><span>Flow</span><strong>{email_status}</strong></div>
+                </div>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_login() -> None:
+    logo_uri = _nav_logo_data_uri()
+    selected_language = st.session_state.get("saas_language_code", "en")
+    welcome_title = "خوش آمدید" if selected_language == "fa" else "Welcome back"
+    google_label = "ادامه با گوگل" if selected_language == "fa" else "Continue with Google"
+    logo_markup = (
+        f'<img src="{logo_uri}" class="auth-logo-image" alt="certAIn logo" />'
+        if logo_uri
+        else '<span class="auth-logo-fallback">A</span>'
+    )
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell auth-page-shell">
+              <div class="auth-card">
+                <div class="auth-logo-shell">{logo_markup}</div>
+                <h1 class="auth-title">{welcome_title}</h1>
+                <p class="auth-title-helper">Don't have an account?</p>
+                <form class="auth-form-shell" method="get" action="">
+                  <input type="hidden" name="page" value="registration-confirmation" />
+                  <input type="hidden" name="lang" value="{st.session_state.get("saas_language_code", "en")}" />
+                  <div class="auth-preview-stack">
+                    <div class="auth-field-group">
+                      <label>Email</label>
+                      <input class="auth-input-field" type="email" name="register_email" placeholder="team@certain.ai" autocomplete="email" />
+                    </div>
+                    <div class="auth-field-group">
+                      <label>Password</label>
+                      <input class="auth-input-field password" type="password" placeholder="........" autocomplete="new-password" />
+                    </div>
+                  </div>
+                  <button type="submit" class="auth-register-button">Register Now</button>
+                </form>
+                <div class="auth-social-stack">
+                  <a href="{_href("dashboard")}" class="auth-social-button">
+                    <span>{google_label}</span>
+                  </a>
+                  <a href="{_href("dashboard")}" class="auth-social-button">
+                    <span class="auth-social-icon apple"></span>
+                    <span>Continue with Apple</span>
+                  </a>
+                </div>
+                <div class="auth-separator"><span>or continue with email</span></div>
+                <form class="auth-form-shell" method="get" action="">
+                  <input type="hidden" name="page" value="pricing" />
+                  <input type="hidden" name="lang" value="{st.session_state.get("saas_language_code", "en")}" />
+                  <div class="auth-field-group">
+                    <label>Email</label>
+                    <input class="auth-input-field" type="email" name="auth_email" placeholder="you@company.com" autocomplete="email" />
+                  </div>
+                  <div class="auth-field-group">
+                    <label>Password</label>
+                    <input class="auth-input-field password" type="password" placeholder="........" autocomplete="current-password" />
+                  </div>
+                  <div class="auth-meta-row">
+                    <label class="auth-check-row">
+                      <input type="checkbox" class="auth-checkbox-input" name="remember_me" />
+                      <span>Remember me</span>
+                    </label>
+                    <a href="{_href("contact")}" class="auth-forgot-link">Forgot password?</a>
+                  </div>
+                  <button type="submit" class="auth-submit-button">Sign In</button>
+                </form>
+              </div>
+              <div class="auth-trust-row">
+                <span class="auth-trust-pill"><span class="auth-trust-dot"></span>256-bit encryption</span>
+                <span class="auth-trust-pill"><span class="auth-trust-dot"></span>SOC2 &amp; GDPR</span>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def _render_dashboard() -> None:
@@ -4951,11 +8252,11 @@ def _render_dashboard() -> None:
 def _render_user_guide() -> None:
     _render_command_bar()
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
           <div class="glass dashboard-banner">
             <span class="kicker">User Guide</span>
-            <h1 class="page-title">Welcome to the certAIn workspace.</h1>
+            <h1 class="page-title">Welcome to the {_brand_name_html()} workspace.</h1>
             <p class="page-copy">
               This landing page helps judges and users understand how to move through the platform from upload to executive reporting.
             </p>
@@ -5362,11 +8663,11 @@ def _render_summary() -> None:
 def _render_upload() -> None:
     _render_command_bar()
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
           <div class="glass dashboard-banner">
             <span class="kicker">Project Upload</span>
-            <h1 class="page-title">Drop source files and preview how certAIn would parse them.</h1>
+            <h1 class="page-title">Drop source files and preview how {_brand_name_html()} would parse them.</h1>
           </div>
         </div>
         """,
@@ -5403,7 +8704,7 @@ def _render_integrations() -> None:
         <div class="feature-card">
           <span class="eyebrow">Available</span>
           <h3>{tool}</h3>
-          <p>Connect planning data and sync project status into certAIn.</p>
+          <p>Connect planning data and sync project status into {_brand_name_html()}.</p>
         </div>
         """
         for tool in integrations
@@ -5423,18 +8724,43 @@ def _render_settings_page() -> None:
         st.toggle("Email alerts", value=bool(st.session_state.saas_email_alerts), key="saas_email_alerts")
         st.toggle("In-app alerts", value=bool(st.session_state.saas_in_app_alerts), key="saas_in_app_alerts")
         st.toggle("AI alerts", value=bool(st.session_state.saas_ai_alerts), key="saas_ai_alerts")
-        st.selectbox("Language", ["English", "German", "French"], key="saas_language")
+        language_labels = [label for _, label, _ in LANGUAGE_OPTIONS]
+        current_language_label = st.session_state.get("saas_language", "English")
+        selected_language = st.selectbox(
+            "Language",
+            language_labels,
+            index=language_labels.index(current_language_label) if current_language_label in language_labels else 0,
+            key="settings_language_selector",
+        )
+        if selected_language != current_language_label:
+            selected_code = next(code for code, label, _ in LANGUAGE_OPTIONS if label == selected_language)
+            st.session_state.saas_language = selected_language
+            st.session_state.saas_language_code = selected_code
+            try:
+                st.query_params["lang"] = selected_code
+            except Exception:
+                st.experimental_set_query_params(page="settings-page", lang=selected_code)
+            st.rerun()
         st.selectbox("Region", ["Global", "EU", "US"], key="saas_region")
 
 
 def main() -> None:
     _init_state()
+    _sync_auth_email_from_query()
+    _sync_contact_email_from_query()
+    _sync_registration_email_from_query()
+    _sync_language_from_query()
     _inject_styles()
     page = _resolve_page()
+    _sync_newsletter_subscription_flow(page)
+    _sync_registration_flow(page)
     _inject_layout_state(page)
     _render_sidebar(page)
     _render_nav(page)
     _render_floating_shortcut(page)
+    _render_command_palette(page)
+    _mount_command_palette_shortcuts()
+    _mount_page_translation()
 
     if page == "home":
         _render_home()
@@ -5448,6 +8774,14 @@ def main() -> None:
         _render_pricing()
     elif page == "contact":
         _render_contact()
+    elif page == "faq":
+        _render_faq()
+    elif page in {"privacy-policy", "terms-of-service", "cookie-settings", "security-data-protection"}:
+        _render_legal_page(page)
+    elif page == "subscription-confirmation":
+        _render_subscription_confirmation()
+    elif page == "registration-confirmation":
+        _render_registration_confirmation()
     elif page == "about":
         _render_about()
     elif page == "login":
@@ -5477,7 +8811,9 @@ def main() -> None:
     else:
         _render_dashboard()
 
-    _render_footer()
+    _render_footer(page)
+    _render_ai_assistant(page)
+    _mount_ai_assistant(page)
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Static compile check
-        run: python -m compileall -q src app.py scripts tests
+        run: python -m compileall -q src app1.py scripts tests
 
       - name: Smoke test
         run: python scripts/smoke_test.py
