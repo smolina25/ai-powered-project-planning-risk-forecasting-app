@@ -14,7 +14,7 @@ install-dev:
 	$(PYTHON) -m pip install -r requirements-dev.txt
 
 run:
-	$(STREAMLIT) run app.py
+	$(STREAMLIT) run app1.py
 
 test:
 	pytest -q

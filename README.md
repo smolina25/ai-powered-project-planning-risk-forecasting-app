@@ -6,6 +6,8 @@ certAIn Project Intelligence is a stakeholder-ready **Streamlit application** th
 
 The platform helps project managers move from **static spreadsheet planning to probabilistic, AI-assisted decision making**.
 
+certAIn is designed as a generalized AI-powered project planning platform. Its core capabilities, including natural-language task generation, dependency graph modeling, critical-path analysis, Monte Carlo forecasting, scenario comparison, and executive reporting, are applicable across many project domains. The current dataset is used only to support the first version of the advisory ML risk model and to provide a concrete demonstration of the platform’s workflow. In other words, the platform itself is domain-agnostic.
+
 ---
 
 # Project Motivation
@@ -72,17 +74,20 @@ The platform enables project managers to **evaluate uncertainty, compare executi
 
 <br>
 
-# Dataset Note
+## Dataset Strategy
 
-The datasets used in this capstone are **synthetic but designed to reflect realistic project planning characteristics**, including schedule delays, cost overruns, resource allocation, and stakeholder alignment.
+The capstone uses **three bundled datasets** with different roles in the workflow:
+1. Task-level dataset `construction_dataset.csv`: Training the ML model
 
-Synthetic data was used because real project portfolio data is typically **confidential and not publicly available**.
+2. Project-level dataset: `project_portfolio_history.csv`: EDA, understanding delays, simulation context
 
-The goal of this capstone is to demonstrate the **analytical workflow, modeling approach, and platform design**, rather than represent a specific organization’s internal project data.
+3. Monitoring dataset `risk_monitoring_snapshot.csv`: Tracking performance, alerts, drift
 
-**project_portfolio_history.csv** is used for **model training and analysis dataset**. It contains **historical project data**, which represents past project outcomes. It answers: **What project characteristics lead to higher risk or delays?** 
+- **construction_dataset.csv** is the **task-level training dataset** for the first bundled advisory risk classifier in the app. It contains the features and labels used by `scripts/train_risk_model.py` to produce `models/risk_classifier.joblib` and `models/risk_model_metrics.json`. The checked-in file aligns with the Kaggle `Construction Project Management Dataset` listing, whose page describes it as schedule, cost, and risk data from real projects.
+- **project_portfolio_history.csv** is the **project-level historical dataset** used for exploratory analysis, project-level benchmarking, forecasting context, and dashboard storytelling.
+- **risk_monitoring_snapshot.csv** is the **monitoring dataset** used for confidence tracking, forecast error analysis, and drift-oriented monitoring views.
 
-**risk_monitoring_snapshot.csv** is used for **post-deployment model monitoring dataset**. It represents **new incoming projects after the model has already been deployed**. It answers: **Is the deployed model still reliable on new projects?**
+The three datasets support different parts of the capstone rather than one single end-to-end training table. They support the current demonstration workflow and bundled model artifacts, while the underlying platform remains extensible to additional domains and retrained models. The repository also includes `scripts/generate_capstone_datasets.py`, which can generate synthetic capstone-style datasets for local experimentation, but that utility script should not be treated as the provenance source for the checked-in `construction_dataset.csv`.
 
 ---
 
@@ -95,46 +100,34 @@ AI-powered-project-planning-risk-forecasting-app/
 │
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml
-│       └── pages.yml
-│
-├── docs/
-│   ├── capstone-business-questions.md
-│   ├── technical-eda-summary.md
-│   ├── model-comparison.md
-│   ├── capstone-deliverables-map.md
-│   └── mvp-test-synthesis.md
-│
+│       └── ci.yml
+├── data/
+│   ├── construction_dataset.csv
+│   ├── project_portfolio_history.csv
+│   └── risk_monitoring_snapshot.csv
+├── models/
+│   ├── risk_classifier.joblib
+│   └── risk_model_metrics.json
 ├── notebooks/
 │   ├── 01_business_understanding_and_data_audit.ipynb
 │   ├── 02_exploratory_data_analysis.ipynb
 │   ├── 03_baseline_and_model_comparison.ipynb
-│   ├── 04_risk_forecasting_simulation.ipynb
+│   ├── 04_risk_forecasting_dag_monte_carlo.ipynb
 │   └── 05_model_monitoring.ipynb
-│
+├── presentation/
+│   └── certAIn_midterm_presentation.md
 ├── scripts/
+│   ├── generate_capstone_datasets.py
+│   ├── generate_final_ds_notebooks.py
 │   ├── smoke_test.py
 │   └── train_risk_model.py
-│
-├── tests/
-│   ├── test_schema.py
-│   ├── test_graph_builder.py
-│   └── test_ml_predictor.py
-│
 ├── src/
-│   ├── modeling/
-│   ├── simulation/
-│   ├── analytics/
-│   └── utils/
-│
-├── models/
-│   └── risk_classifier.joblib
-│
-├── data/
-│
-├── app.py
+├── tests/
+├── web/
+├── app1.py
 ├── Dockerfile
 ├── docker-compose.yml
+├── Makefile
 ├── requirements.txt
 ├── requirements-dev.txt
 └── README.md
@@ -208,17 +201,19 @@ Run the notebooks in order:
 01_business_understanding_and_data_audit.ipynb
 02_exploratory_data_analysis.ipynb
 03_baseline_and_model_comparison.ipynb
-04_risk_forecasting_simulation.ipynb
+04_risk_forecasting_dag_monte_carlo.ipynb
 05_model_monitoring.ipynb
 ```
 
-These notebooks demonstrate the **full ML lifecycle required for the capstone**:
+These notebooks document the capstone workflow from project-level analysis through forecasting and monitoring:
 
 1. Business understanding  
-2. Exploratory data analysis  
-3. Model comparison  
+2. Exploratory portfolio analysis  
+3. Exploratory project-level model comparison  
 4. Monte Carlo risk forecasting  
 5. Model monitoring  
+
+The bundled advisory classifier used by the app is trained separately from `data/construction_dataset.csv` via `scripts/train_risk_model.py`.
 
 ---
 
@@ -227,7 +222,7 @@ These notebooks demonstrate the **full ML lifecycle required for the capstone**:
 Start the platform locally:
 
 ```bash
-streamlit run app.py
+streamlit run app1.py
 ```
 
 The application will open in your browser.
@@ -243,6 +238,7 @@ GROQ_API_KEY=
 APP_MODE=mock
 DEMO_DEFAULT_MODE=mock
 GROQ_MODEL=llama-3.3-70b-versatile
+APP_BASE_URL=http://localhost:8501
 DEFAULT_ITERATIONS=1000
 MAX_ITERATIONS=2000
 MAX_TASKS=12
@@ -254,6 +250,14 @@ RISK_MODEL_ENABLED=true
 RISK_MODEL_PATH=models/risk_classifier.joblib
 RISK_MODEL_METRICS_PATH=models/risk_model_metrics.json
 RISK_MODEL_VERSION=v1-advisory-multimodel
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_SENDER_EMAIL=
+SMTP_SENDER_NAME=certAIn
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
 ```
 
 ### Notes
@@ -261,6 +265,7 @@ RISK_MODEL_VERSION=v1-advisory-multimodel
 - `APP_MODE=mock` is recommended for UI development and demos.
 - `APP_MODE=real` requires a valid `GROQ_API_KEY`.
 - ML scoring is advisory and should be interpreted alongside Monte Carlo results.
+- Footer newsletter confirmations send real emails only when the SMTP settings above are configured.
 
 ---
 
@@ -315,7 +320,7 @@ The best model is selected using **cross-validated macro F1 score**.
 
 1. Push repository to GitHub  
 2. Create a Streamlit app at **share.streamlit.io**  
-3. Select `app.py` as entrypoint  
+3. Select `app1.py` as entrypoint  
 4. Add secrets such as `GROQ_API_KEY`  
 5. Deploy  
 
@@ -333,30 +338,18 @@ Docker ensures reproducible local environments but is optional for Streamlit Clo
 
 # Presentation Assets
 
-Located in:
-
-```
-presentation/
-```
-
-Includes:
-
-- demo script
-- backup demo
-- final presentation slides
-- stakeholder evidence pack
+Presentation assets are stored in `presentation/`, including the markdown slide deck and presentation images.
 
 ---
 
 # Capstone Evidence
 
-The `docs/` folder contains artifacts used for evaluation:
+Evidence for the capstone is distributed across:
 
-- business questions
-- technical EDA summary
-- model comparison
-- deliverables mapping
-- MVP testing synthesis
+- `notebooks/` for analysis, forecasting, and monitoring
+- `presentation/` for the presentation narrative and visual assets
+- `models/risk_model_metrics.json` for the bundled model lineage and metrics
+- `tests/` for automated verification of the core application logic
 
 ---
 

@@ -9,7 +9,7 @@ import pandas as pd
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate synthetic capstone datasets for certAIn Project Intelligence."
+        description="Generate synthetic capstone-style datasets for local certAIn experimentation."
     )
     parser.add_argument("--out-dir", default="data", help="Directory for generated CSV files.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")

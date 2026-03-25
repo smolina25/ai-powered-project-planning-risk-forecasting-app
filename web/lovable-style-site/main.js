@@ -74,26 +74,28 @@ function buildFooter() {
           <a href="product.html">Features</a>
           <a href="ai-forecasting.html">AI Forecasting</a>
           <a href="monte-carlo.html">Monte Carlo</a>
-          <a href="dashboard.html">Dashboard</a>
+          <a href="pricing.html">Pricing</a>
         </div>
         <div>
           <h3>Company</h3>
           <a href="about.html">About Us</a>
-          <a href="pricing.html">Pricing</a>
-          <a href="login.html">Login</a>
+          <a href="about.html">Contact Us</a>
+          <a href="product.html">About the Product</a>
+          <span class="footer-static-link">Careers (Coming Soon)</span>
         </div>
         <div>
           <h3>Resources</h3>
-          <a href="index.html">Overview</a>
-          <a href="product.html">Product Tour</a>
-          <a href="dashboard.html">Forecast Console</a>
-          <a href="about.html">Project Story</a>
+          <a href="guide.html">User Guide</a>
+          <a href="integrations.html">Tools Integration</a>
+          <a href="executive-summary.html">Executive Summary</a>
+          <a href="faq.html">FAQ</a>
         </div>
         <div>
           <h3>Legal</h3>
-          <span class="footer-badge">Capstone project</span>
-          <span class="footer-badge">Presentation-ready</span>
-          <span class="footer-badge">Portfolio-ready</span>
+          <a class="footer-legal-link" href="privacy-policy.html">Privacy Policy</a>
+          <a class="footer-legal-link" href="terms-of-service.html">Terms of Service</a>
+          <a class="footer-legal-link" href="cookie-settings.html">Cookie Settings</a>
+          <a class="footer-legal-link" href="security-data-protection.html">Security &amp; Data Protection</a>
         </div>
       </div>
 
