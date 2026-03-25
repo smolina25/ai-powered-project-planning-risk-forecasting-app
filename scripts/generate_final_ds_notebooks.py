@@ -96,10 +96,12 @@ def build_notebook_01() -> nbformat.NotebookNode:
                 **Project:** certAIn Product Intelligence  
                 **Product:** AI-powered Project Planning & Risk Forecasting App
 
-                This notebook frames the capstone business problem and audits the two new data-science datasets used for risk analysis and model monitoring:
+                This notebook frames the capstone business problem and audits the project-level analytics and monitoring datasets used throughout the forecasting workflow:
 
                 - `data/project_portfolio_history.csv`
                 - `data/risk_monitoring_snapshot.csv`
+
+                The task-level advisory classifier training dataset, `data/construction_dataset.csv`, is tracked separately in the training pipeline and model metrics. The checked-in file aligns with the Kaggle `Construction Project Management Dataset` listing.
                 """
             ),
             md(
@@ -238,8 +240,10 @@ def build_notebook_01() -> nbformat.NotebookNode:
 
                 The two datasets are clean enough for capstone analysis. The business value comes from linking them:
 
-                - `project_portfolio_history.csv` supports EDA and supervised learning,
+                - `project_portfolio_history.csv` supports EDA, project-level benchmarking, and forecasting context,
                 - `risk_monitoring_snapshot.csv` supports post-model monitoring and forecast reliability analysis.
+
+                The bundled task-level advisory classifier used by the app is trained separately from `construction_dataset.csv`, the repo training CSV aligned with the Kaggle `Construction Project Management Dataset` listing.
 
                 The next notebook focuses on pattern discovery across delays, complexity, team composition, and risk outcomes.
                 """
@@ -259,7 +263,7 @@ def build_notebook_02() -> nbformat.NotebookNode:
                 """
                 # 02 Exploratory Data Analysis
 
-                This notebook explores the portfolio dataset to understand patterns in project duration, delay risk, and project complexity. The analysis supports both the business story and the later modeling choices.
+                This notebook explores the portfolio dataset to understand patterns in project duration, delay risk, and project complexity. It supports the business story and exploratory project-level modeling, while the bundled task-level advisory classifier is trained separately from `construction_dataset.csv`, the repo training CSV aligned with the Kaggle `Construction Project Management Dataset` listing.
                 """
             ),
             code(COMMON_SETUP),
@@ -498,31 +502,21 @@ def build_notebook_03() -> nbformat.NotebookNode:
         cells=[
             md(
                 """
-                # 03 Baseline Model and Model Comparison
+                # 03 Bundled Advisory Model Review
 
-                This notebook trains and compares classical supervised models that predict `Outcome_Risk_Level` from project planning and context variables. The goal is not to replace the simulation engine, but to add an interpretable portfolio-level risk signal.
+                This notebook focuses only on the current task-level advisory model bundled with the app. It uses `data/construction_dataset.csv` together with `models/risk_model_metrics.json` so the notebook reflects the same model lineage shown in the dashboard and presentation.
                 """
             ),
             code(
                 """
                 from pathlib import Path
+                import json
                 import warnings
 
-                import numpy as np
                 import pandas as pd
                 import matplotlib.pyplot as plt
                 import seaborn as sns
                 from IPython.display import Markdown, display
-
-                from sklearn.compose import ColumnTransformer
-                from sklearn.dummy import DummyClassifier
-                from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-                from sklearn.impute import SimpleImputer
-                from sklearn.linear_model import LogisticRegression
-                from sklearn.metrics import ConfusionMatrixDisplay, accuracy_score, confusion_matrix, f1_score
-                from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
-                from sklearn.pipeline import Pipeline
-                from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
                 warnings.filterwarnings("ignore")
 
@@ -531,201 +525,187 @@ def build_notebook_03() -> nbformat.NotebookNode:
                     PROJECT_ROOT = PROJECT_ROOT.parent
 
                 DATA_DIR = PROJECT_ROOT / "data"
+                MODELS_DIR = PROJECT_ROOT / "models"
                 sns.set_theme(style="whitegrid", context="notebook")
                 pd.set_option("display.max_columns", 50)
+                pd.set_option("display.float_format", lambda value: f"{value:,.3f}")
                 """
             ),
             md(
                 """
-                ## 1. Load Data and Define the Modeling Problem
+                ## 1. Load the Current Training Dataset and Metrics
 
-                We predict `Outcome_Risk_Level` using only variables that are available at or near planning time. We intentionally exclude realized outcome columns such as `Actual_Duration_Days` and `Budget_Overrun_Pct` to avoid target leakage.
+                The goal here is consistency with the bundled advisory model artifact. Instead of replaying older exploratory model comparisons, this notebook reads the current task-level training CSV and the saved metrics JSON produced by the training pipeline.
                 """
             ),
             code(
                 """
-                project_df = pd.read_csv(DATA_DIR / "project_portfolio_history.csv")
+                task_df = pd.read_csv(DATA_DIR / "construction_dataset.csv")
+                metrics = json.loads((MODELS_DIR / "risk_model_metrics.json").read_text())
+                selected_metrics = next(
+                    item
+                    for item in metrics["model_comparison"]
+                    if item["model_name"] == metrics["selected_model_name"]
+                )
+                selected_model_name = metrics["selected_model_name"]
 
-                target_column = "Outcome_Risk_Level"
-                feature_columns = [
-                    "Portfolio_Segment",
-                    "Region",
-                    "Delivery_Model",
-                    "Planning_Mode",
-                    "Complexity_Score",
-                    "Planned_Duration_Days",
-                    "Planned_Budget_USD",
-                    "Team_Size",
-                    "Critical_Path_Task_Count",
-                    "Vendor_Count",
-                    "Change_Order_Count",
-                    "Resource_Buffer_Pct",
-                    "Weather_Risk_Index",
-                    "Procurement_Risk_Index",
-                    "Stakeholder_Alignment_Score",
-                    "Requirements_Volatility_Score",
-                ]
+                summary_df = pd.DataFrame(
+                    {
+                        "item": [
+                            "rows",
+                            "columns",
+                            "target_column",
+                            "selected_model_name",
+                            "selection_metric",
+                            "model_version",
+                        ],
+                        "value": [
+                            len(task_df),
+                            task_df.shape[1],
+                            metrics["target_column"],
+                            metrics["selected_model_name"],
+                            metrics["selection_metric"],
+                            metrics["model_version"],
+                        ],
+                    }
+                )
 
-                X = project_df[feature_columns]
-                y = project_df[target_column]
-
-                display(y.value_counts().rename_axis("risk_level").to_frame("count"))
+                display(summary_df)
                 """
             ),
-            md("## 2. Train/Test Split and Preprocessing"),
+            md("## 2. Dataset Overview"),
             code(
                 """
-                categorical_features = ["Portfolio_Segment", "Region", "Delivery_Model", "Planning_Mode"]
-                numeric_features = [column for column in feature_columns if column not in categorical_features]
+                display(task_df.head())
 
-                preprocessor = ColumnTransformer(
-                    transformers=[
-                        (
-                            "categorical",
-                            Pipeline(
-                                steps=[
-                                    ("imputer", SimpleImputer(strategy="most_frequent")),
-                                    ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-                                ]
-                            ),
-                            categorical_features,
-                        ),
-                        (
-                            "numeric",
-                            Pipeline(
-                                steps=[
-                                    ("imputer", SimpleImputer(strategy="median")),
-                                    ("scaler", StandardScaler()),
-                                ]
-                            ),
-                            numeric_features,
-                        ),
+                target_counts = (
+                    task_df[metrics["target_column"]]
+                    .value_counts()
+                    .rename_axis("risk_level")
+                    .reset_index(name="count")
+                )
+                display(target_counts)
+
+                feature_columns = pd.DataFrame(
+                    {"feature_column": metrics["feature_columns"]}
+                )
+                display(feature_columns)
+                """
+            ),
+            md(
+                """
+                ## 3. Selected Model Summary
+
+                The training pipeline evaluated multiple candidates, but this notebook surfaces only the model that is actually bundled with the app.
+                """
+            ),
+            code(
+                """
+                selected_metrics_df = pd.DataFrame(
+                    [
+                        {
+                            "Selected Model": selected_model_name,
+                            "Selection Metric": metrics["selection_metric"],
+                            "Test Accuracy": selected_metrics["test_accuracy"],
+                            "Macro F1": selected_metrics["test_macro_f1"],
+                            "Weighted F1": selected_metrics["test_weighted_f1"],
+                            "CV Macro F1": selected_metrics["cv_macro_f1_mean"],
+                            "CV Macro F1 Std": selected_metrics["cv_macro_f1_std"],
+                        }
                     ]
                 )
 
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X,
-                    y,
-                    test_size=0.2,
-                    stratify=y,
-                    random_state=42,
+                selection_note_df = pd.DataFrame(
+                    {
+                        "field": ["selection_reason", "trained_at_utc"],
+                        "value": [metrics["selection_reason"], metrics["trained_at_utc"]],
+                    }
                 )
 
-                cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+                display(selected_metrics_df)
+                display(selection_note_df)
                 """
             ),
-            md("## 3. Train Baseline and Candidate Models"),
+            md("## 4. Selected Model Metrics"),
             code(
                 """
-                def evaluate_model(name: str, estimator) -> tuple[dict, np.ndarray]:
-                    pipeline = Pipeline([("preprocessor", preprocessor), ("model", estimator)])
-                    pipeline.fit(X_train, y_train)
-                    predictions = pipeline.predict(X_test)
-                    labels = sorted(y.unique())
-                    cv_scores = cross_val_score(
-                        pipeline,
-                        X_train,
-                        y_train,
-                        cv=cv,
-                        scoring="f1_macro",
-                        n_jobs=1,
-                    )
-
-                    metrics = {
-                        "model": name,
-                        "test_accuracy": accuracy_score(y_test, predictions),
-                        "test_macro_f1": f1_score(y_test, predictions, average="macro"),
-                        "cv_macro_f1_mean": cv_scores.mean(),
-                        "cv_macro_f1_std": cv_scores.std(),
+                metric_plot_df = pd.DataFrame(
+                    {
+                        "metric": ["Test Accuracy", "Macro F1", "Weighted F1", "CV Macro F1"],
+                        "value": [
+                            selected_metrics["test_accuracy"],
+                            selected_metrics["test_macro_f1"],
+                            selected_metrics["test_weighted_f1"],
+                            selected_metrics["cv_macro_f1_mean"],
+                        ],
                     }
-                    matrix = confusion_matrix(y_test, predictions, labels=labels)
-                    return metrics, matrix
+                )
 
-
-                models = {
-                    "DummyClassifier": DummyClassifier(strategy="most_frequent"),
-                    "LogisticRegression": LogisticRegression(max_iter=2000, class_weight="balanced"),
-                    "RandomForest": RandomForestClassifier(
-                        n_estimators=300,
-                        min_samples_leaf=2,
-                        class_weight="balanced",
-                        random_state=42,
-                    ),
-                    "GradientBoosting": GradientBoostingClassifier(random_state=42),
-                }
-
-                results = []
-                confusion_matrices = {}
-                labels = sorted(y.unique())
-
-                for model_name, estimator in models.items():
-                    metrics, matrix = evaluate_model(model_name, estimator)
-                    results.append(metrics)
-                    confusion_matrices[model_name] = matrix
-
-                results_df = pd.DataFrame(results).sort_values("cv_macro_f1_mean", ascending=False)
-                display(results_df)
-                """
-            ),
-            md("## 4. Metric Comparison"),
-            code(
-                """
-                fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-                sns.barplot(data=results_df, x="model", y="test_accuracy", ax=axes[0], palette="Blues_d")
-                axes[0].set_title("Test Accuracy by Model")
-                axes[0].tick_params(axis="x", rotation=25)
-                axes[0].set_ylim(0, 1)
-
-                sns.barplot(data=results_df, x="model", y="test_macro_f1", ax=axes[1], palette="Greens_d")
-                axes[1].set_title("Test Macro F1 by Model")
-                axes[1].tick_params(axis="x", rotation=25)
-                axes[1].set_ylim(0, 1)
-
+                plt.figure(figsize=(8, 5))
+                sns.barplot(data=metric_plot_df, x="metric", y="value", palette="Blues_d")
+                plt.title(f"Selected Model Metrics: {selected_model_name}")
+                plt.xlabel("")
+                plt.ylabel("Score")
+                plt.ylim(0, 1)
+                plt.xticks(rotation=20)
                 plt.tight_layout()
                 plt.show()
                 """
             ),
-            md("## 5. Confusion Matrices"),
+            md("## 5. Selected Model Confusion Matrix"),
             code(
                 """
-                fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+                confusion = metrics["confusion_matrix"]
+                labels = confusion["labels"]
+                confusion_df = pd.DataFrame(
+                    confusion["values"],
+                    index=labels,
+                    columns=labels,
+                )
 
-                for axis, model_name in zip(axes.flatten(), models.keys()):
-                    matrix = confusion_matrices[model_name]
-                    sns.heatmap(
-                        matrix,
-                        annot=True,
-                        fmt="d",
-                        cmap="Blues",
-                        cbar=False,
-                        ax=axis,
-                        xticklabels=labels,
-                        yticklabels=labels,
-                    )
-                    axis.set_title(model_name)
-                    axis.set_xlabel("Predicted")
-                    axis.set_ylabel("Actual")
+                plt.figure(figsize=(6, 5))
+                sns.heatmap(confusion_df, annot=True, fmt="d", cmap="Blues", cbar=False)
+                plt.title(f"Confusion Matrix: {metrics['selected_model_name']}")
+                plt.xlabel("Predicted")
+                plt.ylabel("Actual")
 
+                plt.show()
+                """
+            ),
+            md("## 6. Feature Importance"),
+            code(
+                """
+                feature_importance_df = pd.DataFrame(metrics["feature_importance"]).sort_values(
+                    "importance",
+                    ascending=False,
+                )
+
+                plt.figure(figsize=(8, 5))
+                sns.barplot(
+                    data=feature_importance_df.head(8),
+                    x="importance",
+                    y="feature",
+                    palette="viridis",
+                )
+                plt.title("Top Feature Importance Values")
+                plt.xlabel("Permutation Importance")
+                plt.ylabel("Feature")
                 plt.tight_layout()
                 plt.show()
                 """
             ),
-            md("## 6. Model Interpretation"),
+            md("## 7. Interpretation"),
             code(
                 """
-                best_model = results_df.iloc[0]
-                baseline_row = results_df[results_df["model"] == "DummyClassifier"].iloc[0]
-
                 display(
                     Markdown(
                         f'''
-                        **Model comparison summary**
+                        **Current bundled model summary**
 
-                        - The baseline `DummyClassifier` reaches **{baseline_row['test_accuracy']:.3f}** accuracy but only **{baseline_row['test_macro_f1']:.3f}** macro F1.
-                        - The best model by cross-validated macro F1 is **{best_model['model']}** with **{best_model['cv_macro_f1_mean']:.3f} ± {best_model['cv_macro_f1_std']:.3f}**.
-                        - Test-set macro F1 improves from **{baseline_row['test_macro_f1']:.3f}** to **{best_model['test_macro_f1']:.3f}**, showing that the richer models capture useful risk structure beyond the majority class.
-                        - This model should be positioned as an advisory risk signal that complements Monte Carlo forecasting rather than replacing it.
+                        - The selected bundled model is **{metrics['selected_model_name']}**, chosen by **{metrics['selection_metric']}**.
+                        - The selected model records **{selected_metrics['cv_macro_f1_mean']:.3f}** cross-validated macro F1 and **{selected_metrics['test_macro_f1']:.3f}** test macro F1.
+                        - The dashboard, slide deck, and metrics file now point to the same bundled model and dataset lineage.
+                        - This notebook intentionally omits non-runtime candidate models so it stays aligned with what the app actually uses.
                         '''
                     )
                 )
@@ -1027,7 +1007,7 @@ def main() -> None:
         NOTEBOOKS_DIR / "01_business_understanding_and_data_audit.ipynb": build_notebook_01,
         NOTEBOOKS_DIR / "02_exploratory_data_analysis.ipynb": build_notebook_02,
         NOTEBOOKS_DIR / "03_baseline_and_model_comparison.ipynb": build_notebook_03,
-        NOTEBOOKS_DIR / "04_risk_forecasting_simulation.ipynb": build_notebook_04,
+        NOTEBOOKS_DIR / "04_risk_forecasting_dag_monte_carlo.ipynb": build_notebook_04,
     }
 
     for path, builder in notebook_builders.items():

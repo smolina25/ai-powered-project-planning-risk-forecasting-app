@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import base64
 import copy
+import html
 import json
+import re
+import time
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
 
+import networkx as nx
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
+from docx import Document as DocxDocument
+from pypdf import PdfReader
 
 from src.ai.task_generator import generate_task_plan
 from src.analytics.metrics import compute_metrics
@@ -27,6 +35,11 @@ from src.simulation.monte_carlo import run_monte_carlo
 from src.storage.db import init_db
 from src.storage.repository import get_run_details, list_recent_runs, save_session_run
 from src.utils.errors import GraphValidationError, TaskGenerationError
+from src.utils.emailing import (
+    build_subscription_confirmation_link,
+    send_registration_confirmation_email,
+    send_subscription_confirmation_email,
+)
 from src.visualization.charts import (
     completion_histogram,
     dependency_graph_figure,
@@ -45,6 +58,7 @@ st.set_page_config(
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT / "assets"
+LEADERSHIP_IMAGES = ASSETS / "leadership_images"
 NAV_LOGO_PNG_PATH = ASSETS / "logo-mark.png"
 LOGO_PNG_PATH = ASSETS / "logo.png"
 LEGACY_LOGO_PNG_PATH = ASSETS / "cetAIn logo.png"
@@ -60,10 +74,17 @@ NAV_ITEMS = [
     ("dashboard", "Dashboard"),
     ("about", "About Us"),
     ("contact", "Contact Us"),
+    ("faq", "FAQ"),
     ("login", "Login"),
 ]
 
 PAGE_TITLES = {key: label for key, label in NAV_ITEMS}
+PAGE_TITLES["subscription-confirmation"] = "Subscription Confirmation"
+PAGE_TITLES["registration-confirmation"] = "Registration Confirmation"
+PAGE_TITLES["privacy-policy"] = "Privacy Policy"
+PAGE_TITLES["terms-of-service"] = "Terms of Service"
+PAGE_TITLES["cookie-settings"] = "Cookie Settings"
+PAGE_TITLES["security-data-protection"] = "Security & Data Protection"
 
 DASHBOARD_ITEMS = [
     ("guide", "User Guide"),
@@ -74,13 +95,35 @@ DASHBOARD_ITEMS = [
     ("what-if", "What-If Scenarios"),
     ("history", "Version History"),
     ("summary", "Executive Summary"),
-    ("upload", "Project Upload"),
     ("integrations", "Tools Integration"),
     ("settings-page", "Settings"),
 ]
 
 for key, label in DASHBOARD_ITEMS:
     PAGE_TITLES[key] = label
+
+COMMAND_PALETTE_ITEMS = [
+    ("Platform", "home", "Home", "Return to the landing page"),
+    ("Platform", "product", "Product", "Explore the full product story"),
+    ("Platform", "forecasting", "AI Forecasting", "Review advisory ML and forecast evidence"),
+    ("Platform", "monte-carlo", "Monte Carlo", "See probabilistic schedule simulation"),
+    ("Platform", "pricing", "Pricing", "Compare plan options and trial entry points"),
+    ("Platform", "dashboard", "Dashboard", "Open the forecast console"),
+    ("Platform", "about", "About Us", "Read the capstone and team story"),
+    ("Platform", "contact", "Contact Us", "Reach the certAIn team"),
+    ("Platform", "faq", "FAQ", "Browse common product and demo questions"),
+    ("Platform", "login", "Login", "Open the authentication page"),
+    ("Workspace", "guide", "User Guide", "Learn the workspace flow"),
+    ("Workspace", "decision-hub", "Decision Hub", "Review executive decision signals"),
+    ("Workspace", "task-architect", "AI Task Architect", "Generate and inspect task plans"),
+    ("Workspace", "risk-intelligence", "Risk Intelligence", "Inspect generated task structures and dependency risk"),
+    ("Workspace", "simulator", "Monte Carlo Simulator", "Run and compare schedule simulations"),
+    ("Workspace", "what-if", "What-If Scenarios", "Test mitigation and acceleration options"),
+    ("Workspace", "history", "Version History", "Open recent workspace runs"),
+    ("Workspace", "summary", "Executive Summary", "Open the stakeholder-ready summary"),
+    ("Workspace", "integrations", "Tools Integration", "Review connected delivery tools"),
+    ("Workspace", "settings-page", "Settings", "Adjust workspace preferences"),
+]
 
 DASHBOARD_PAGE_KEYS = {key for key, _ in DASHBOARD_ITEMS} | {"dashboard"}
 
@@ -197,38 +240,37 @@ FOOTER_LINK_COLUMNS = [
     (
         "Product",
         [
-            ("Features", "product", None),
             ("AI Forecasting", "forecasting", None),
             ("Monte Carlo Simulation", "monte-carlo", None),
-            ("Pricing", "pricing", None),
             ("Dashboard", "dashboard", None),
+            ("Pricing", "pricing", None),
         ],
     ),
     (
         "Company",
         [
             ("About Us", "about", None),
-            ("Careers", None, "Coming soon"),
-            ("Blog", None, "Coming soon"),
             ("Contact Us", "contact", None),
+            ("About the Product", "product", None),
+            ("Careers", None, "Coming Soon"),
         ],
     ),
     (
         "Resources",
         [
-            ("Documentation", None, "Coming soon"),
-            ("API Reference", None, "Coming soon"),
-            ("Tools Integration", "integrations", None),
             ("User Guide", "guide", None),
+            ("Tools Integration", "integrations", None),
+            ("Executive Summary", "summary", None),
+            ("FAQ", "faq", None),
         ],
     ),
     (
         "Legal",
         [
-            ("Privacy Policy", None, None),
-            ("Terms of Service", None, None),
-            ("Cookie Policy", None, None),
-            ("Security", None, None),
+            ("Privacy Policy", "privacy-policy", None),
+            ("Terms of Service", "terms-of-service", None),
+            ("Cookie Settings", "cookie-settings", None),
+            ("Security & Data Protection", "security-data-protection", None),
         ],
     ),
 ]
@@ -238,7 +280,36 @@ FOOTER_SOCIALS = [
     ("x", "X"),
     ("github", "GitHub"),
     ("youtube", "YouTube"),
+    ("instagram", "Instagram"),
+    ("facebook", "Facebook"),
 ]
+
+FOOTER_SOCIAL_LINKS = {
+    "linkedin": "https://www.linkedin.com/",
+    "x": "https://x.com/",
+    "github": "https://github.com/",
+    "youtube": "https://www.youtube.com/@meysamehshojaei1296",
+    "instagram": "https://www.instagram.com/",
+    "facebook": "https://www.facebook.com/",
+}
+
+LANGUAGE_OPTIONS = [
+    ("en", "English", "en"),
+    ("fa", "فارسی", "fa"),
+    ("iw", "עברית", "iw"),
+    ("de", "Deutsch", "de"),
+    ("it", "Italiano", "it"),
+    ("es", "Español", "es"),
+    ("fr", "Français", "fr"),
+    ("pt", "Português", "pt"),
+    ("zh-CN", "中文", "zh-CN"),
+    ("ja", "日本語", "ja"),
+    ("ar", "العربية", "ar"),
+]
+
+LANGUAGE_LABELS = {code: label for code, label, _ in LANGUAGE_OPTIONS}
+LANGUAGE_WIDGET_CODES = {code: widget_code for code, _, widget_code in LANGUAGE_OPTIONS}
+SUPPORTED_LANGUAGE_CODES = set(LANGUAGE_LABELS)
 
 FOOTER_COMPLIANCE = [
     ("ISO", "ISO 27001", "International"),
@@ -294,6 +365,20 @@ html, body, [class*="css"] {
 
 body {
   color: var(--text);
+}
+
+body {
+  top: 0 !important;
+}
+
+.goog-te-banner-frame.skiptranslate,
+.goog-te-gadget,
+.goog-logo-link,
+.goog-te-gadget span,
+#google_translate_element,
+#certain_google_translate_element {
+  display: none !important;
+  visibility: hidden !important;
 }
 
 a {
@@ -368,6 +453,21 @@ a {
   100% { background-position: 0% 50%; filter: brightness(0.98); }
 }
 
+@keyframes constellationDrift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(var(--group-scale, 1)); }
+  50% { transform: translate3d(var(--drift-x, 12px), var(--drift-y, -10px), 0) scale(var(--group-scale, 1)); }
+}
+
+@keyframes nodePulse {
+  0%, 100% { opacity: 0.72; filter: brightness(0.96); }
+  50% { opacity: 1; filter: brightness(1.18); }
+}
+
+@keyframes linkPulse {
+  0%, 100% { opacity: 0.14; }
+  50% { opacity: 0.34; }
+}
+
 [data-testid="stHeader"],
 [data-testid="stToolbar"],
 [data-testid="stDecoration"],
@@ -385,6 +485,33 @@ footer {
 
 [data-testid="stSidebar"] > div:first-child {
   background: transparent !important;
+  height: 100vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-bottom: 1.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(117, 231, 255, 0.34) rgba(255, 255, 255, 0.04);
+}
+
+[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+  height: auto !important;
+  min-height: 100vh;
+  overflow: visible !important;
+  padding-bottom: 1.25rem;
+}
+
+[data-testid="stSidebar"] > div:first-child::-webkit-scrollbar {
+  width: 10px;
+}
+
+[data-testid="stSidebar"] > div:first-child::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-testid="stSidebar"] > div:first-child::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(122, 67, 255, 0.75), rgba(24, 209, 199, 0.72));
 }
 
 .stApp,
@@ -407,32 +534,152 @@ footer {
 .saas-shell {
   position: fixed;
   inset: 0;
-  width: 100%;
-  height: 0;
+  width: 100vw;
+  height: 100vh;
   pointer-events: none;
-  z-index: -3;
+  overflow: hidden;
+  z-index: 0;
 }
 
-.starfield {
+.particle-network {
   position: fixed;
   inset: 0;
-  z-index: -2;
+  z-index: 0;
   pointer-events: none;
-  opacity: 0.55;
-  background-image:
-    radial-gradient(circle, rgba(196, 221, 255, 0.85) 0 1px, transparent 1.45px),
-    radial-gradient(circle, rgba(196, 221, 255, 0.38) 0 1px, transparent 1.7px),
-    radial-gradient(circle, rgba(91, 157, 255, 0.22) 0 1px, transparent 2px);
-  background-size: 220px 220px, 310px 310px, 420px 420px;
-  background-position: 0 0, 90px 120px, 180px 60px;
+  overflow: hidden;
+  opacity: 0.9;
+}
+
+.particle-network::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle, rgba(196, 221, 255, 0.22) 0 1px, transparent 1.4px) 8% 18% / 320px 220px,
+    radial-gradient(circle, rgba(120, 176, 255, 0.18) 0 1px, transparent 1.5px) 72% 32% / 360px 260px,
+    radial-gradient(circle, rgba(117, 239, 230, 0.18) 0 1px, transparent 1.4px) 34% 74% / 420px 280px;
+  opacity: 0.45;
+  animation: gradientShift 38s linear infinite;
+}
+
+.particle-network::after {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  background:
+    radial-gradient(circle at 65% 40%, rgba(102, 198, 255, 0.14), transparent 20%),
+    radial-gradient(circle at 36% 62%, rgba(25, 210, 201, 0.08), transparent 18%),
+    radial-gradient(circle at 82% 18%, rgba(155, 92, 255, 0.1), transparent 16%);
+  filter: blur(48px);
+  opacity: 0.42;
+}
+
+.particle-group {
+  position: absolute;
+  width: var(--group-w);
+  height: var(--group-h);
+  animation: constellationDrift var(--duration, 18s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+.particle-group.group-a {
+  top: 16%;
+  right: 7%;
+  --group-w: 280px;
+  --group-h: 156px;
+  --drift-x: 16px;
+  --drift-y: -10px;
+  --duration: 19s;
+}
+
+.particle-group.group-b {
+  top: 43%;
+  left: 31%;
+  --group-w: 212px;
+  --group-h: 172px;
+  --drift-x: -12px;
+  --drift-y: 12px;
+  --duration: 17s;
+  --delay: -7s;
+}
+
+.particle-group.group-c {
+  bottom: 15%;
+  right: 9%;
+  --group-w: 184px;
+  --group-h: 118px;
+  --drift-x: 10px;
+  --drift-y: -8px;
+  --duration: 14s;
+  --delay: -11s;
+}
+
+.particle-link {
+  position: absolute;
+  height: 1px;
+  border-radius: 999px;
+  transform-origin: left center;
+  background: linear-gradient(
+    90deg,
+    rgba(115, 171, 255, 0),
+    rgba(158, 214, 255, 0.55),
+    rgba(115, 171, 255, 0.08)
+  );
+  box-shadow: 0 0 14px rgba(92, 169, 255, 0.18);
+  animation: linkPulse 6.5s ease-in-out infinite;
+}
+
+.particle-node {
+  position: absolute;
+  width: var(--size, 8px);
+  height: var(--size, 8px);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    circle,
+    rgba(244, 250, 255, 0.98) 0 24%,
+    rgba(var(--particle-rgb, 114, 178, 255), 0.94) 42%,
+    rgba(var(--particle-rgb, 114, 178, 255), 0) 78%
+  );
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 18px rgba(var(--particle-rgb, 114, 178, 255), 0.3),
+    0 0 38px rgba(var(--particle-rgb, 114, 178, 255), 0.2);
+  animation: nodePulse var(--pulse, 5.5s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+.particle-node.blue {
+  --particle-rgb: 111, 170, 255;
+}
+
+.particle-node.teal {
+  --particle-rgb: 104, 236, 227;
+}
+
+.particle-node.violet {
+  --particle-rgb: 174, 127, 255;
+}
+
+.particle-node.soft {
+  --particle-rgb: 210, 230, 255;
+}
+
+.particle-node::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: inherit;
+  background: radial-gradient(circle, rgba(var(--particle-rgb, 114, 178, 255), 0.18), transparent 72%);
+  filter: blur(7px);
 }
 
 .ambient-orb {
   position: fixed;
   border-radius: 999px;
-  filter: blur(90px);
-  opacity: 0.48;
-  z-index: -1;
+  filter: blur(110px);
+  opacity: 0.28;
+  z-index: 0;
   pointer-events: none;
   animation: floatDrift 18s ease-in-out infinite;
 }
@@ -442,7 +689,7 @@ footer {
   height: 16rem;
   top: 7rem;
   left: 7%;
-  background: rgba(155, 92, 255, 0.22);
+  background: rgba(155, 92, 255, 0.18);
 }
 
 .orb-b {
@@ -450,7 +697,7 @@ footer {
   height: 20rem;
   top: 18rem;
   right: 7%;
-  background: rgba(25, 210, 201, 0.14);
+  background: rgba(25, 210, 201, 0.12);
   animation-delay: -6s;
 }
 
@@ -459,14 +706,47 @@ footer {
   height: 18rem;
   top: 26rem;
   left: 34%;
-  background: rgba(100, 162, 255, 0.16);
+  background: rgba(100, 162, 255, 0.13);
   animation-delay: -11s;
+}
+
+@media (max-width: 900px) {
+  .particle-group.group-a {
+    right: 4%;
+    --group-scale: 0.86;
+  }
+
+  .particle-group.group-b {
+    left: 14%;
+    top: 48%;
+    --group-scale: 0.82;
+  }
+
+  .particle-group.group-c {
+    right: 4%;
+    bottom: 18%;
+    --group-scale: 0.78;
+  }
 }
 
 .hero-shell,
 .page-shell {
   width: min(100%, var(--content-width));
   margin-inline: auto;
+}
+
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] > .main,
+.block-container,
+.nav-shell,
+[data-testid="stSidebar"] {
+  position: relative;
+}
+
+.block-container,
+.nav-shell,
+[data-testid="stSidebar"] {
+  z-index: 1;
 }
 
 .nav-shell {
@@ -622,6 +902,19 @@ footer {
   align-items: center;
 }
 
+.brand-media.with-wordmark {
+  gap: 0.8rem;
+  width: auto;
+  max-width: 100%;
+}
+
+.brand-logo-shell {
+  width: 58px;
+  flex: 0 0 58px;
+  display: inline-flex;
+  align-items: center;
+}
+
 .brand-lockup.nav .brand-media {
   width: clamp(118px, 16vw, 168px);
 }
@@ -634,7 +927,8 @@ footer {
 }
 
 .brand-lockup.sidebar .brand-media {
-  width: min(100%, 220px);
+  width: auto;
+  max-width: 100%;
 }
 
 .brand-lockup.footer .brand-media {
@@ -646,6 +940,16 @@ footer {
   width: 100%;
   height: auto;
   filter: drop-shadow(0 14px 30px rgba(76, 138, 244, 0.2));
+}
+
+.brand-word-inline {
+  font-family: "Sora", sans-serif;
+  font-size: 1.28rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  white-space: nowrap;
+  color: #eef5ff;
 }
 
 .brand-copy {
@@ -837,6 +1141,7 @@ footer {
 .btn-outline-cta {
   border: 1.5px solid transparent;
   color: #f5fbff;
+  font-weight: 800;
   background:
     linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
     linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box;
@@ -1833,6 +2138,194 @@ footer {
   font-size: 0.86rem;
 }
 
+.pricing-hero-card {
+  margin-bottom: 1.2rem;
+}
+
+.pricing-showcase-shell {
+  padding-bottom: 3.2rem;
+}
+
+.pricing-showcase {
+  align-items: stretch;
+  justify-content: center;
+  gap: 22px;
+}
+
+.pricing-showcase .pricing-plan-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 300px;
+  max-width: 358px;
+  min-height: 540px;
+  padding: 2rem 2rem 1.9rem;
+  border-radius: 24px;
+  border: 1px solid rgba(104, 117, 161, 0.22);
+  background: linear-gradient(180deg, rgba(10, 13, 19, 0.98), rgba(8, 11, 16, 0.98));
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  gap: 1.2rem;
+}
+
+.pricing-showcase .pricing-plan-card:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 22px 44px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.pricing-showcase .pricing-plan-card-featured {
+  border-color: rgba(62, 133, 255, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(59, 131, 255, 0.18),
+    0 18px 42px rgba(10, 26, 61, 0.52),
+    0 0 34px rgba(46, 130, 255, 0.18);
+}
+
+.pricing-showcase .pricing-plan-card-featured:hover {
+  box-shadow:
+    0 0 0 1px rgba(73, 145, 255, 0.24),
+    0 22px 48px rgba(10, 26, 61, 0.58),
+    0 0 42px rgba(46, 130, 255, 0.24);
+}
+
+.pricing-plan-badge {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(133, 105, 255, 0.98), rgba(42, 191, 234, 0.98));
+  color: #ffffff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: 0 10px 24px rgba(50, 112, 255, 0.28);
+}
+
+.pricing-plan-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+}
+
+.pricing-showcase .pricing-plan-name {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  font-size: 1.05rem;
+  color: rgba(246, 249, 255, 0.96);
+}
+
+.pricing-price-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.38rem;
+}
+
+.pricing-price-row-custom {
+  align-items: center;
+}
+
+.pricing-price-value {
+  font-family: "Sora", sans-serif;
+  font-size: clamp(3rem, 4vw, 3.75rem);
+  line-height: 0.95;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+  color: rgba(247, 249, 255, 0.98);
+}
+
+.pricing-price-value-custom {
+  font-size: clamp(2.85rem, 3.8vw, 3.4rem);
+}
+
+.pricing-price-suffix {
+  margin-bottom: 0.38rem;
+  color: rgba(183, 192, 211, 0.88);
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.pricing-plan-copy {
+  margin: 0;
+  color: rgba(180, 188, 205, 0.92) !important;
+  line-height: 1.5;
+}
+
+.pricing-feature-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin: 0;
+  padding: 0.4rem 0 0;
+  list-style: none;
+}
+
+.pricing-feature-list li {
+  position: relative;
+  padding-left: 1.5rem;
+  color: rgba(236, 241, 249, 0.96);
+  line-height: 1.45;
+}
+
+.pricing-feature-list li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: rgba(232, 224, 255, 0.98);
+  font-weight: 800;
+}
+
+.pricing-plan-cta {
+  margin-top: auto;
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  text-decoration: none !important;
+  font-weight: 700;
+  font-size: 1rem;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.pricing-plan-cta:hover {
+  transform: translateY(-1px);
+}
+
+.pricing-plan-cta-muted {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(18, 21, 31, 0.98), rgba(11, 14, 22, 0.98)) padding-box,
+    linear-gradient(90deg, rgba(129, 89, 255, 0.98), rgba(42, 191, 234, 0.98)) border-box;
+  color: rgba(242, 246, 255, 0.96);
+  box-shadow:
+    0 0 0 1px rgba(92, 82, 255, 0.14),
+    0 10px 22px rgba(8, 12, 26, 0.32),
+    0 0 18px rgba(55, 138, 255, 0.12);
+}
+
+.pricing-plan-cta-muted:hover {
+  box-shadow:
+    0 0 0 1px rgba(92, 82, 255, 0.22),
+    0 14px 26px rgba(8, 12, 26, 0.38),
+    0 0 24px rgba(55, 138, 255, 0.18);
+}
+
+.pricing-plan-cta-primary {
+  background: linear-gradient(90deg, rgba(70, 117, 255, 0.98), rgba(46, 191, 233, 0.98));
+  color: #ffffff;
+  box-shadow: 0 16px 34px rgba(30, 118, 255, 0.28);
+}
+
+.pricing-plan-cta-primary:hover {
+  box-shadow: 0 20px 38px rgba(30, 118, 255, 0.34);
+}
+
 .metric-showcase-grid,
 .process-grid {
   display: grid;
@@ -1956,14 +2449,1338 @@ footer {
   padding: 2rem 2.1rem;
 }
 
+.about-proto-shell {
+  padding-top: 1.55rem;
+}
+
+.about-top-stage {
+  width: min(100%, 1218px);
+  margin-inline: auto;
+}
+
+.about-proto-hero,
+.about-journey-section,
+.about-final-cta {
+  text-align: center;
+}
+
+.about-proto-hero {
+  display: grid;
+  justify-items: center;
+  gap: 1.45rem;
+  margin-bottom: 4.05rem;
+}
+
+.about-proto-logo-shell {
+  width: clamp(258px, 25.4vw, 296px);
+  height: clamp(160px, 17.1vw, 184px);
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid rgba(137, 109, 255, 0.16);
+  background:
+    linear-gradient(180deg, rgba(2, 5, 11, 0.995), rgba(2, 5, 11, 0.995));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 64px rgba(122, 67, 255, 0.42),
+    0 30px 72px rgba(0, 0, 0, 0.34);
+}
+
+.about-proto-logo-shell img {
+  width: 75%;
+  height: auto;
+  display: block;
+}
+
+.about-proto-title {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(3.3rem, 4.9vw, 4.6rem);
+  line-height: 0.97;
+  letter-spacing: -0.06em;
+}
+
+.about-proto-subtitle {
+  max-width: 900px;
+  margin: 0;
+  color: rgba(232, 241, 255, 0.76);
+  font-size: 1.08rem;
+  line-height: 1.72;
+}
+
+.about-mv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.95rem;
+  margin-bottom: 4.25rem;
+}
+
+.about-mv-card {
+  border: 1px solid transparent;
+  border-radius: 18px;
+  min-height: 280px;
+  padding: 2rem 2rem 1.9rem;
+  text-align: left;
+  background:
+    linear-gradient(180deg, rgba(7, 10, 16, 0.985), rgba(6, 9, 15, 0.995)) padding-box,
+    linear-gradient(135deg, rgba(129, 90, 255, 0.62), rgba(70, 155, 255, 0.48), rgba(55, 214, 255, 0.5)) border-box;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 0 1px rgba(51, 211, 255, 0.08),
+    0 18px 34px rgba(0, 0, 0, 0.2);
+}
+
+.about-card-icon,
+.about-value-icon {
+  width: 3.05rem;
+  height: 3.05rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 15px;
+  border: 1px solid rgba(116, 231, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(36, 47, 105, 0.92), rgba(18, 30, 68, 0.97));
+  color: #eef5ff;
+  font-size: 1.05rem;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.01) inset,
+    0 0 26px rgba(92, 169, 255, 0.24);
+}
+
+.about-card-icon svg,
+.about-value-icon svg {
+  width: 1.24rem;
+  height: 1.24rem;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.about-mv-card h3,
+.about-timeline-card h3 {
+  margin: 1.32rem 0 0.88rem;
+  font-size: 1.2rem;
+  letter-spacing: -0.04em;
+}
+
+.about-mv-card p,
+.about-timeline-card p,
+.about-member-card p,
+.about-value-card p {
+  margin: 0;
+  color: rgba(232, 241, 255, 0.78);
+  line-height: 1.76;
+}
+
+.about-values-section {
+  width: min(100%, 1220px);
+  margin-inline: auto;
+  text-align: center;
+  margin-bottom: 5.15rem;
+}
+
+.about-values-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 40px;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(232, 241, 255, 0.72);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.about-values-pill svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.about-section-heading {
+  margin: 1rem 0 0.7rem;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(2.35rem, 3.4vw, 3.45rem);
+  line-height: 1.02;
+  letter-spacing: -0.06em;
+}
+
+.about-section-copy {
+  max-width: 640px;
+  margin: 0 auto;
+  color: rgba(232, 241, 255, 0.72);
+}
+
+.about-values-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.2rem;
+  margin-top: 2.15rem;
+}
+
+.about-value-card {
+  min-height: 210px;
+  padding: 1.7rem 1.25rem 1.5rem;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(9, 14, 24, 0.9), rgba(6, 10, 18, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.015) inset,
+    0 18px 34px rgba(0, 0, 0, 0.16);
+}
+
+.about-value-card h3 {
+  margin: 1.15rem 0 0.55rem;
+  font-size: 1.18rem;
+  letter-spacing: -0.04em;
+}
+
+.about-journey-section {
+  width: min(100%, 1220px);
+  margin: 0 auto 5.1rem;
+}
+
+.about-timeline {
+  position: relative;
+  width: min(100%, 1000px);
+  margin: 2.55rem auto 0;
+}
+
+.about-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(92, 169, 255, 0.46), rgba(255, 255, 255, 0.04));
+  opacity: 0.7;
+}
+
+.about-timeline-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
+  gap: 1.35rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.about-timeline-row:last-child {
+  margin-bottom: 0;
+}
+
+.about-timeline-side {
+  min-width: 0;
+}
+
+.about-timeline-axis {
+  position: relative;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.about-timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #67d8ff, #3b8cff);
+  box-shadow:
+    0 0 0 7px rgba(47, 162, 255, 0.08),
+    0 0 24px rgba(92, 169, 255, 0.42);
+}
+
+.about-timeline-card {
+  position: relative;
+  width: min(100%, 360px);
+  min-height: 132px;
+  padding: 1.4rem 1.45rem 1.3rem;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    linear-gradient(180deg, rgba(8, 13, 24, 0.98), rgba(5, 9, 18, 0.96)) padding-box,
+    linear-gradient(135deg, rgba(138, 91, 255, 0.62), rgba(70, 155, 255, 0.34), rgba(52, 215, 255, 0.18)) border-box;
+  box-shadow:
+    0 24px 52px rgba(0, 0, 0, 0.26),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 0 34px rgba(73, 132, 255, 0.08);
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+
+.about-timeline-card::before,
+.about-timeline-card::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(10px);
+  z-index: 0;
+}
+
+.about-timeline-card::before {
+  width: 10rem;
+  height: 10rem;
+  top: -4rem;
+  right: -3.5rem;
+  background: radial-gradient(circle, rgba(132, 96, 255, 0.24), transparent 70%);
+}
+
+.about-timeline-card::after {
+  width: 8rem;
+  height: 8rem;
+  left: -2.6rem;
+  bottom: -3.2rem;
+  background: radial-gradient(circle, rgba(74, 156, 255, 0.16), transparent 72%);
+}
+
+.about-timeline-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.about-timeline-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow:
+    0 30px 68px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(173, 198, 255, 0.07) inset,
+    0 0 48px rgba(96, 121, 255, 0.18);
+}
+
+.about-timeline-row.left .about-timeline-card {
+  margin-left: auto;
+  text-align: right;
+}
+
+.about-timeline-row.right .about-timeline-card {
+  margin-right: auto;
+}
+
+.about-timeline-year {
+  display: block;
+  margin-bottom: 0.56rem;
+  color: #8cc3ff;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.about-journey-step-title {
+  margin: 0 0 0.58rem;
+  font-size: 1.18rem;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+}
+
+.about-team-section {
+  width: min(100%, 1220px);
+  margin-inline: auto;
+  text-align: left;
+  margin-bottom: 5rem;
+}
+
+.about-team-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.9rem;
+}
+
+.about-team-icon {
+  width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(238, 245, 255, 0.92);
+}
+
+.about-team-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.about-team-head .about-section-heading {
+  margin: 0;
+  font-size: clamp(2.05rem, 2.9vw, 2.85rem);
+}
+
+.about-team-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.15rem;
+  margin-top: 0;
+  align-items: stretch;
+}
+
+.about-member-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  min-height: 100%;
+  padding: 1.55rem 1.45rem 1.5rem;
+  text-align: center;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    linear-gradient(180deg, rgba(8, 13, 24, 0.98), rgba(5, 9, 18, 0.96)) padding-box,
+    linear-gradient(135deg, rgba(138, 91, 255, 0.62), rgba(70, 155, 255, 0.34), rgba(52, 215, 255, 0.18)) border-box;
+  box-shadow:
+    0 26px 52px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 0 34px rgba(73, 132, 255, 0.08);
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+
+.about-member-card::before,
+.about-member-card::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(10px);
+  z-index: 0;
+}
+
+.about-member-card::before {
+  width: 11rem;
+  height: 11rem;
+  top: -4.5rem;
+  right: -4rem;
+  background: radial-gradient(circle, rgba(132, 96, 255, 0.24), transparent 70%);
+}
+
+.about-member-card::after {
+  width: 9rem;
+  height: 9rem;
+  left: -3rem;
+  bottom: -4rem;
+  background: radial-gradient(circle, rgba(74, 156, 255, 0.18), transparent 72%);
+}
+
+.about-member-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.about-member-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow:
+    0 32px 68px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(173, 198, 255, 0.07) inset,
+    0 0 46px rgba(96, 121, 255, 0.18);
+}
+
+.avatar-wrapper {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.team-avatar {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+  background: #111;
+}
+
+.team-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  display: block;
+  filter: brightness(0.85);
+}
+
+.team-avatar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.about-member-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.17rem;
+  letter-spacing: -0.04em;
+  background: linear-gradient(90deg, var(--purple) 0%, var(--blue) 52%, var(--teal) 100%);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradientShift 8s linear infinite;
+}
+
+.about-member-role {
+  margin-top: 0;
+  margin-bottom: 0.95rem;
+  color: #91c4ff;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.about-final-cta {
+  width: min(100%, 1220px);
+  margin: 0 auto;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  padding: 4.45rem 1rem 4.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(180deg, rgba(7, 11, 18, 0.55), rgba(7, 11, 18, 0.2));
+}
+
+.about-final-cta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 42px 42px;
+  opacity: 0.12;
+  pointer-events: none;
+}
+
+.about-final-cta > * {
+  position: relative;
+  z-index: 1;
+}
+
+.about-final-cta h2 {
+  margin: 0 0 0.75rem;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(1.9rem, 3vw, 3rem);
+  line-height: 1.04;
+  letter-spacing: -0.05em;
+}
+
+.about-final-cta p {
+  margin: 0 auto;
+  max-width: 640px;
+  color: rgba(232, 241, 255, 0.78);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.about-sales-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-width: 184px;
+  min-height: 50px;
+  margin-top: 1.8rem;
+  padding: 0 1.55rem;
+  border-radius: 18px;
+  border: 0;
+  background: linear-gradient(90deg, #7a4fff 0%, #4c8af4 52%, #7a4fff 100%);
+  box-shadow: 0 0 28px rgba(122, 67, 255, 0.28);
+  color: #eef5ff;
+  font-family: "Sora", sans-serif;
+  font-size: 0.96rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.st-key-about_contact_sales_button div.stButton > button,
+.st-key-about_contact_sales_button button {
+  border: 1px solid rgba(122, 67, 255, 0.3) !important;
+  background: linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--purple-strong) 100%) !important;
+  box-shadow: 0 14px 38px rgba(122, 67, 255, 0.24) !important;
+}
+
+.st-key-about_contact_sales_button div.stButton > button:hover,
+.st-key-about_contact_sales_button button:hover {
+  box-shadow: 0 16px 42px rgba(122, 67, 255, 0.3) !important;
+}
+
+.st-key-about_contact_sales_button div.stButton > button[kind="primary"],
+.st-key-about_contact_sales_button button[kind="primary"] {
+  border-color: rgba(122, 67, 255, 0.34) !important;
+  background: linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--purple-strong) 100%) !important;
+  box-shadow: 0 14px 38px rgba(122, 67, 255, 0.24) !important;
+}
+
+.about-sales-cta span {
+  font-size: 1.05rem;
+}
+
+.about-inline-ai {
+  font-weight: 800;
+}
+
 .detail-grid {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.product-card-cta {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.product-card-cta-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-width: 210px;
+  min-height: 48px;
+  padding: 0 1.45rem;
+  border-radius: 18px;
+  color: #eef5ff;
+  font-family: "Sora", sans-serif;
+  font-size: 0.94rem;
+  font-weight: 700;
+  text-decoration: none;
+  background: linear-gradient(90deg, #5f6bff 0%, #4f8ef5 52%, #28c2ea 100%);
+  box-shadow: 0 0 26px rgba(76, 138, 244, 0.28);
+  transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
+}
+
+.product-card-cta-link:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow: 0 0 30px rgba(76, 138, 244, 0.34);
+}
+
+.guide-how-section {
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0 1.5rem;
+}
+
+.guide-how-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: "Sora", sans-serif;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.guide-how-head svg {
+  width: 18px;
+  height: 18px;
+  stroke: #46a7ff;
+  stroke-width: 1.9;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.guide-how-shell {
+  padding: 1.25rem 1.3rem;
+}
+
+.guide-how-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.guide-how-card {
+  min-height: 114px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0.6rem;
+  padding: 1.2rem 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(8, 13, 20, 0.88), rgba(8, 13, 20, 0.96));
+  text-align: center;
+}
+
+.guide-how-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #46a7ff;
+}
+
+.guide-how-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  stroke-width: 1.85;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.guide-how-card strong {
+  display: block;
+  font-family: "Sora", sans-serif;
+  font-size: 1rem;
+}
+
+.guide-how-card span {
+  color: rgba(220, 233, 255, 0.62);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.guide-modules-section {
+  display: block;
+  margin: 0.35rem 0 1.6rem;
+}
+
+.guide-modules-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(300px, 3fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.guide-modules-main {
+  display: grid;
+  gap: 1rem;
+}
+
+.guide-modules-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: "Sora", sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.guide-modules-head svg {
+  width: 18px;
+  height: 18px;
+  stroke: #46a7ff;
+  stroke-width: 1.9;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.guide-modules-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.guide-module-card {
+  display: grid;
+  gap: 0.95rem;
+  min-height: 238px;
+  padding: 1.2rem 1.2rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(8, 13, 20, 0.9), rgba(8, 13, 20, 0.98));
+  text-decoration: none;
+  color: inherit;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.guide-module-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.guide-module-link:focus-visible {
+  outline: 2px solid rgba(70, 167, 255, 0.7);
+  outline-offset: 3px;
+  border-radius: 20px;
+}
+
+.guide-module-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+}
+
+.guide-module-head {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.guide-module-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: #eef5ff;
+}
+
+.guide-module-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.guide-module-icon.decision { background: linear-gradient(135deg, #2e77ff, #55a4ff); }
+.guide-module-icon.task { background: linear-gradient(135deg, #8a43ff, #d66cff); }
+.guide-module-icon.risk { background: linear-gradient(135deg, #d79312, #f0b738); }
+.guide-module-icon.monte { background: linear-gradient(135deg, #16a56c, #43d07f); }
+.guide-module-icon.summary { background: linear-gradient(135deg, #4c8af4, #74b5ff); }
+.guide-module-icon.upload { background: linear-gradient(135deg, #7a8597, #adb6c4); }
+
+.guide-module-title {
+  font-family: "Sora", sans-serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.guide-module-arrow {
+  margin-left: auto;
+  color: rgba(220, 233, 255, 0.28);
+  font-size: 1rem;
+}
+
+.guide-module-copy {
+  margin: 0;
+  color: rgba(220, 233, 255, 0.68);
+  line-height: 1.7;
+}
+
+.guide-module-preview {
+  margin-top: auto;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.guide-module-note-kicker {
+  color: #46a7ff;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.guide-module-note-copy {
+  margin: 0.45rem 0 0;
+  color: rgba(220, 233, 255, 0.68);
+  line-height: 1.72;
+  font-size: 0.9rem;
+}
+
+.guide-sparkline {
+  height: 84px;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)),
+    rgba(7, 11, 17, 0.7);
+  overflow: hidden;
+}
+
+.guide-sparkline svg,
+.guide-monte-preview svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.guide-risk-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.guide-risk-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.55rem;
+  align-items: center;
+  color: rgba(232, 241, 255, 0.82);
+  font-size: 0.9rem;
+}
+
+.guide-risk-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.guide-risk-dot.high { background: #ff564d; }
+.guide-risk-dot.medium { background: #ffb020; }
+.guide-risk-dot.low { background: #99a2b2; }
+
+.guide-risk-value.high { color: #ff564d; }
+.guide-risk-value.medium { color: #ffb020; }
+.guide-risk-value.low { color: rgba(232, 241, 255, 0.66); }
+
+.guide-monte-preview {
+  height: 84px;
+  border-radius: 14px;
+  background: rgba(7, 11, 17, 0.7);
+  overflow: hidden;
+}
+
+.guide-activity-panel {
+  display: grid;
+  gap: 1.1rem;
+  padding: 1.2rem 1.2rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(8, 13, 20, 0.9), rgba(8, 13, 20, 0.98));
+  box-shadow: 0 20px 46px rgba(0, 0, 0, 0.2);
+}
+
+.guide-activity-title {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.guide-activity-block {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.guide-activity-subhead {
+  margin: 0;
+  color: rgba(232, 241, 255, 0.72);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.guide-activity-list {
+  display: grid;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.guide-activity-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.9rem 0.95rem;
+}
+
+.guide-activity-item + .guide-activity-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.guide-activity-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: rgba(70, 167, 255, 0.12);
+  color: #7fd3ff;
+  box-shadow: inset 0 0 0 1px rgba(70, 167, 255, 0.12);
+}
+
+.guide-activity-icon svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.guide-activity-copy {
+  color: rgba(232, 241, 255, 0.84);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.guide-activity-time {
+  color: rgba(220, 233, 255, 0.5);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.guide-activity-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.guide-activity-action {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+  color: inherit;
+  text-decoration: none;
+  transition: transform 180ms ease, background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.guide-activity-action:hover {
+  transform: translateY(-2px);
+  border-color: rgba(70, 167, 255, 0.22);
+  background: rgba(70, 167, 255, 0.05);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
+.guide-activity-action-label {
+  flex: 1;
+  font-family: "Sora", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.guide-activity-action-arrow {
+  color: rgba(232, 241, 255, 0.42);
+  font-size: 1rem;
+}
+
+.ai-forecast-shell {
+  display: grid;
+  gap: 1.8rem;
+}
+
+.ai-forecast-kicker-card {
+  padding: 1.05rem 1.3rem;
+}
+
+.ai-forecast-stage {
+  display: grid;
+  gap: 1.9rem;
+  text-align: center;
+}
+
+.ai-forecast-copy {
+  width: min(100%, 760px);
+  margin-inline: auto;
+}
+
+.ai-forecast-title {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(2.2rem, 4.5vw, 3.45rem);
+  line-height: 1.04;
+  letter-spacing: -0.055em;
+}
+
+.ai-forecast-subtitle {
+  margin: 1rem auto 0;
+  max-width: 720px;
+  color: rgba(232, 241, 255, 0.76);
+  font-size: 1.04rem;
+  line-height: 1.72;
+}
+
+.ai-forecast-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.ai-forecast-card {
+  min-height: 182px;
+  text-align: left;
+  padding: 1.5rem 1.55rem;
+}
+
+.ai-forecast-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+  color: #eef5ff;
+}
+
+.ai-forecast-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ai-forecast-process-card {
+  padding: 1.55rem 1.7rem 1.7rem;
+  text-align: left;
+}
+
+.ai-forecast-process-card h3 {
+  margin: 0 0 1.5rem;
+  font-family: "Sora", sans-serif;
+  font-size: 1.08rem;
+}
+
+.ai-forecast-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.ai-forecast-step {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+  text-align: center;
+}
+
+.ai-forecast-step-dot {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #46a7ff;
+  font-family: "Sora", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  background: rgba(43, 110, 214, 0.18);
+  box-shadow: 0 0 0 10px rgba(43, 110, 214, 0.08);
+}
+
+.ai-forecast-step strong {
+  font-size: 0.97rem;
+  font-weight: 500;
+}
+
+.ai-forecast-cta-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.15rem;
+}
+
+.ai-forecast-cta {
+  margin-top: 0;
+  min-width: 248px;
+  min-height: 52px;
+  border-radius: 18px;
+}
+
 .dashboard-banner {
   padding: 1.6rem 1.8rem;
+}
+
+.task-architect-shell {
+  display: grid;
+  gap: 1.85rem;
+}
+
+.task-architect-hero {
+  border: 1px solid transparent;
+  border-radius: 30px;
+  padding: 1.45rem 1.65rem 1.7rem;
+  background:
+    linear-gradient(180deg, rgba(16, 24, 40, 0.94), rgba(7, 18, 32, 0.94)) padding-box,
+    linear-gradient(90deg, rgba(123, 78, 255, 0.44) 0%, rgba(79, 123, 255, 0.26) 58%, rgba(17, 225, 245, 0.42) 100%) border-box;
+  box-shadow: var(--shadow);
+}
+
+.task-architect-hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(74, 193, 255, 0.34);
+  background: rgba(8, 18, 34, 0.52);
+  color: #7fe5ff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.task-architect-hero-title {
+  margin: 1.05rem 0 0;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(1.6rem, 2.45vw, 2.6rem);
+  line-height: 1.02;
+  letter-spacing: -0.06em;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.task-architect-panel-head svg,
+.task-architect-primary-btn svg,
+.task-architect-empty-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.task-architect-panel {
+  padding: 1.35rem 1.5rem 1.5rem;
+}
+
+.task-architect-panel-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: rgba(232, 241, 255, 0.62);
+  font-size: 0.83rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.task-architect-parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 1.35rem;
+}
+
+.task-architect-field {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.task-architect-field-label {
+  color: rgba(232, 241, 255, 0.8);
+  font-size: 0.98rem;
+}
+
+.task-architect-input {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.035);
+  color: #f2f8ff;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.task-architect-input.placeholder {
+  color: rgba(232, 241, 255, 0.32);
+}
+
+.task-architect-panel-actions {
+  margin-top: 1.35rem;
+}
+
+.task-architect-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 52px;
+  padding: 0 1.25rem;
+  border-radius: 16px;
+  border: none;
+  background: linear-gradient(90deg, #5c69ff 0%, #29c4f2 100%);
+  box-shadow: 0 14px 34px rgba(67, 140, 255, 0.3);
+  color: #ffffff;
+  font-family: "Sora", sans-serif;
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.task-architect-empty {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  padding: 2.25rem 1.5rem;
+}
+
+.task-architect-empty-inner {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+  text-align: center;
+}
+
+.task-architect-empty-icon {
+  width: 66px;
+  height: 66px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 19px;
+  background: linear-gradient(180deg, rgba(29, 48, 98, 0.96), rgba(18, 30, 67, 0.98));
+  color: #eef5ff;
+  box-shadow:
+    0 0 0 1px rgba(118, 231, 255, 0.12) inset,
+    0 0 24px rgba(92, 169, 255, 0.18);
+}
+
+.task-architect-empty-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.task-architect-empty-title {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  font-size: 1.8rem;
+  letter-spacing: -0.05em;
+}
+
+.task-architect-empty-copy {
+  max-width: 540px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.7;
 }
 
 .kpi-grid {
@@ -2060,6 +3877,32 @@ footer {
   font-family: "Sora", sans-serif;
   font-weight: 700;
   letter-spacing: -0.01em;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box;
+  box-shadow: none;
+}
+
+.sidebar-shortcut-trigger {
+  appearance: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.sidebar-shortcut-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.22),
+    0 14px 34px rgba(0, 0, 0, 0.18);
+}
+
+.sidebar-shortcut-trigger:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(47, 162, 255, 0.12),
+    0 0 0 1px rgba(117, 231, 255, 0.22);
 }
 
 .sidebar-shortcut-caption {
@@ -2081,6 +3924,7 @@ footer {
   gap: 0.55rem;
   padding: 0.7rem 0.8rem 0.35rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  transition: opacity 180ms ease, transform 180ms ease;
 }
 
 .floating-shortcut-wrap .sidebar-shortcut-pill {
@@ -2093,6 +3937,407 @@ footer {
 
 .hero-shortcut-wrap {
   margin: 0.9rem 0 0.2rem;
+}
+
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5rem 1rem 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.command-palette-overlay.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.command-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 7, 14, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.command-palette-card {
+  position: relative;
+  width: min(100%, 760px);
+  max-height: min(72vh, 680px);
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(109, 165, 255, 0.24);
+  background:
+    linear-gradient(180deg, rgba(7, 13, 24, 0.98), rgba(6, 11, 21, 0.97));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 28px 96px rgba(0, 0, 0, 0.42);
+}
+
+.command-palette-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.05rem 1.15rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.command-palette-title {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.command-palette-title strong {
+  font-family: "Sora", sans-serif;
+  font-size: 1rem;
+}
+
+.command-palette-title span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.command-palette-close {
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.command-palette-search {
+  padding: 1rem 1.15rem 0.75rem;
+}
+
+.command-palette-input {
+  width: 100%;
+  min-height: 54px;
+  padding: 0 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.command-palette-input:focus {
+  border-color: rgba(109, 165, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.08);
+}
+
+.command-palette-list {
+  display: grid;
+  gap: 0.7rem;
+  max-height: min(52vh, 520px);
+  padding: 0 1.15rem 1.15rem;
+  overflow: auto;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.command-palette-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(117, 231, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.command-palette-item.active {
+  border-color: rgba(109, 165, 255, 0.24);
+}
+
+.command-palette-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.command-palette-item-title {
+  font-family: "Sora", sans-serif;
+  font-size: 0.98rem;
+}
+
+.command-palette-item-desc {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.command-palette-item-group {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-palette-empty {
+  padding: 1.4rem 1rem;
+  border-radius: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  text-align: center;
+}
+
+.ai-assistant-shell {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 52;
+  display: grid;
+  justify-items: end;
+  gap: 0.85rem;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.ai-assistant-launcher {
+  min-width: 178px;
+  min-height: 56px;
+  padding: 0.7rem 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+  border: 1.5px solid transparent;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box;
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.ai-assistant-launcher:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.22),
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+}
+
+.ai-assistant-launcher:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(47, 162, 255, 0.12),
+    0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.ai-assistant-launcher-icon {
+  width: 2.45rem;
+  height: 2.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(115, 87, 255, 0.95), rgba(47, 162, 255, 0.98));
+  box-shadow: 0 0 26px rgba(78, 143, 255, 0.22);
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.ai-assistant-launcher-copy {
+  display: grid;
+  justify-items: start;
+  gap: 0.14rem;
+  text-align: left;
+}
+
+.ai-assistant-launcher-copy strong {
+  font-family: "Sora", sans-serif;
+  font-size: 0.96rem;
+}
+
+.ai-assistant-launcher-copy span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.ai-assistant-panel {
+  width: min(380px, calc(100vw - 1.5rem));
+  max-height: min(68vh, 620px);
+  overflow: hidden;
+  border-radius: 26px;
+  border: 1px solid rgba(107, 169, 255, 0.24);
+  background: linear-gradient(180deg, rgba(7, 13, 24, 0.985), rgba(5, 10, 19, 0.975));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 28px 88px rgba(0, 0, 0, 0.42);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(16px) scale(0.98);
+  transform-origin: bottom right;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.ai-assistant-shell.is-open .ai-assistant-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.ai-assistant-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 1rem 1rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ai-assistant-head-copy {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.ai-assistant-kicker {
+  color: var(--cyan);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ai-assistant-head-copy strong {
+  font-family: "Sora", sans-serif;
+  font-size: 1rem;
+}
+
+.ai-assistant-head-copy span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.ai-assistant-close {
+  width: 2.15rem;
+  height: 2.15rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ai-assistant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem 0;
+}
+
+.ai-assistant-chip {
+  padding: 0.5rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.ai-assistant-messages {
+  min-height: 210px;
+  max-height: min(42vh, 360px);
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  overflow: auto;
+}
+
+.ai-assistant-message {
+  max-width: 88%;
+  padding: 0.82rem 0.9rem;
+  border-radius: 18px;
+  line-height: 1.55;
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+}
+
+.ai-assistant-message.assistant {
+  justify-self: start;
+  border: 1px solid rgba(117, 231, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ai-assistant-message.user {
+  justify-self: end;
+  background: linear-gradient(135deg, rgba(115, 87, 255, 0.96), rgba(47, 162, 255, 0.96));
+  box-shadow: 0 14px 30px rgba(76, 138, 244, 0.22);
+}
+
+.ai-assistant-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  padding: 0 1rem 1rem;
+}
+
+.ai-assistant-input {
+  min-width: 0;
+  min-height: 50px;
+  padding: 0 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+}
+
+.ai-assistant-input:focus {
+  outline: none;
+  border-color: rgba(109, 165, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.08);
+}
+
+.ai-assistant-send {
+  min-width: 78px;
+  min-height: 50px;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #7357ff 0%, #2fa2ff 100%);
+  box-shadow: 0 12px 28px rgba(76, 138, 244, 0.24);
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .ai-assistant-shell {
+    right: 0.8rem;
+    bottom: 0.9rem;
+  }
+
+  .ai-assistant-panel {
+    width: min(100vw - 1rem, 380px);
+  }
+
+  .ai-assistant-launcher {
+    min-width: 164px;
+  }
 }
 
 .sidebar-section-label {
@@ -2164,6 +4409,73 @@ footer {
   border-bottom: none;
 }
 
+.data-pair strong a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.data-pair strong a:hover,
+.data-pair strong a:focus {
+  text-decoration: underline;
+}
+
+.faq-summary-card .data-pair {
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.faq-summary-card .data-pair span {
+  white-space: nowrap;
+}
+
+.faq-summary-card .data-pair strong {
+  white-space: nowrap;
+  font-size: 0.94rem;
+  letter-spacing: -0.01em;
+  text-align: right;
+}
+
+@media (min-width: 1101px) {
+  .faq-summary-card {
+    width: calc(100% + 2.3cm);
+    margin-right: -2.3cm;
+    justify-self: start;
+  }
+}
+
+.contact-social-inline {
+  margin-top: 1rem;
+}
+
+.contact-social-inline strong {
+  display: block;
+  font-family: "Sora", sans-serif;
+  margin-bottom: 0.35rem;
+}
+
+.contact-social-inline p {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+}
+
+.contact-social-inline .footer-social-row {
+  margin-top: 0;
+}
+
+.contact-top-stack {
+  display: grid;
+  gap: 22px;
+}
+
+.contact-right-balance {
+  min-height: clamp(30rem, 46vh, 40rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
 .timeline-grid,
 .workspace-grid {
   display: grid;
@@ -2233,7 +4545,7 @@ footer {
 
 .footer-panel {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background:
     radial-gradient(circle at 12% 34%, rgba(24, 209, 199, 0.08), transparent 18%),
@@ -2403,6 +4715,19 @@ footer {
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.footer-social-pill:hover {
+  transform: translateY(-1px);
+  border-color: rgba(109, 165, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.footer-social-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.12);
 }
 
 .footer-social-icon {
@@ -2437,6 +4762,7 @@ footer {
 }
 
 .footer-link-column a,
+.footer-link-item,
 .footer-static-link {
   color: var(--muted);
   text-decoration: none;
@@ -2444,8 +4770,29 @@ footer {
   line-height: 1.45;
 }
 
-.footer-link-column a:hover {
+.footer-link-column a:hover,
+.footer-link-item:hover {
   color: var(--text);
+}
+
+.footer-legal-link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  position: relative;
+  z-index: 3;
+  cursor: pointer;
+  color: var(--blue-strong);
+  text-decoration: underline;
+  text-decoration-color: rgba(92, 169, 255, 0.78);
+  text-decoration-thickness: 1.45px;
+  text-underline-offset: 0.18em;
+}
+
+.footer-legal-link:hover,
+.footer-legal-link:focus-visible {
+  color: #eef5ff;
+  text-decoration-color: rgba(92, 169, 255, 0.98);
 }
 
 .footer-link-note {
@@ -2491,11 +4838,31 @@ footer {
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
+  color: #eef5ff;
+  font: inherit;
+  appearance: none;
+}
+
+.footer-input-shell::placeholder {
   color: rgba(158, 176, 203, 0.78);
+}
+
+.footer-input-shell:focus {
+  outline: none;
+  border-color: rgba(109, 165, 255, 0.22);
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.08);
 }
 
 .footer-subscribe-btn {
   min-width: 168px;
+  cursor: pointer;
+  appearance: none;
+  color: var(--blue-strong);
+  font-family: "Sora", sans-serif;
+  letter-spacing: -0.01em;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.12em;
 }
 
 .footer-compliance-row {
@@ -2570,35 +4937,175 @@ footer {
   color: var(--muted);
 }
 
+.footer-language-shell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  position: relative;
+  z-index: 4;
+  margin-right: clamp(7.5rem, 10vw, 9.5rem);
+}
+
+.footer-language-globe {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(219, 231, 250, 0.84);
+}
+
+.footer-language-globe svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+}
+
+.footer-language-globe img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.footer-language-dropdown {
+  position: relative;
+}
+
+.footer-language-toggle {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .footer-language-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.55rem;
   min-height: 42px;
   padding: 0 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);
   color: #dbe7fa;
+  cursor: pointer;
+}
+
+.footer-language-toggle:checked + .footer-language-pill {
+  border-color: rgba(109, 165, 255, 0.18);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .footer-language-flag {
-  min-width: 24px;
-  height: 24px;
-  padding: 0 0.35rem;
-  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(76, 138, 244, 0.16);
-  color: #eef5ff;
-  font-size: 0.72rem;
-  font-weight: 700;
+  width: 18px;
+  height: 13px;
+  line-height: 1;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.footer-language-flag svg {
+  display: block;
+  width: 18px;
+  height: 13px;
+}
+
+.footer-language-flag img {
+  display: block;
+  width: 18px;
+  height: 13px;
 }
 
 .footer-language-caret {
-  color: rgba(219, 231, 250, 0.72);
-  font-size: 0.9rem;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(109, 165, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(219, 231, 250, 0.82);
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.footer-language-caret svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  stroke: currentColor;
+}
+
+.footer-language-toggle:checked + .footer-language-pill .footer-language-caret {
+  transform: rotate(180deg);
+}
+
+.footer-language-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.7rem);
+  min-width: 188px;
+  display: grid;
+  gap: 0;
+  padding: 0.5rem 0;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 14, 24, 0.98);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.34);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 160ms ease, transform 160ms ease, visibility 160ms ease;
+}
+
+.footer-language-toggle:checked ~ .footer-language-menu {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.footer-language-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.78rem 1rem;
+  color: #eef5ff;
+  font-size: 0.98rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.footer-language-option.selected {
+  color: var(--blue-strong);
+  font-weight: 600;
+}
+
+.footer-language-option:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.footer-language-option-flag {
+  min-width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.footer-language-option-flag img {
+  display: block;
+  width: 18px;
+  height: 13px;
+  border-radius: 2px;
 }
 
 .dashboard-note {
@@ -2609,6 +5116,340 @@ footer {
 
 .login-panel {
   padding: 1.7rem;
+}
+
+.auth-page-shell {
+  min-height: calc(100vh - 16rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  padding-top: 2.6rem;
+}
+
+.auth-card {
+  width: min(100%, 420px);
+  padding: 1.85rem 1.9rem 1.7rem;
+  border-radius: 24px;
+  border: 1px solid rgba(87, 160, 255, 0.58);
+  background:
+    linear-gradient(180deg, rgba(10, 14, 22, 0.96), rgba(9, 12, 18, 0.94));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 36px rgba(67, 129, 255, 0.14),
+    0 28px 72px rgba(0, 0, 0, 0.46);
+}
+
+.auth-logo-shell {
+  width: 96px;
+  height: 48px;
+  margin: 0 auto 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.35rem;
+  background: linear-gradient(180deg, rgba(9, 13, 22, 0.98), rgba(6, 9, 16, 0.98));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 0 32px rgba(116, 81, 255, 0.2);
+}
+
+.auth-logo-image {
+  width: 68px;
+  height: auto;
+  display: block;
+}
+
+.auth-logo-fallback {
+  font-family: "Sora", sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.auth-title {
+  margin: 0;
+  text-align: center;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(2rem, 3vw, 2.25rem);
+  letter-spacing: -0.06em;
+}
+
+.auth-title-helper {
+  margin: 0.45rem 0 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.auth-kicker {
+  margin-bottom: 0.65rem;
+  text-align: center;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.auth-subtitle {
+  margin: 0.7rem 0 0;
+  text-align: center;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.auth-register-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  margin-top: 1rem;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #7357ff 0%, #2fa2ff 100%);
+  box-shadow: 0 14px 38px rgba(76, 138, 244, 0.3);
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auth-form-shell {
+  display: grid;
+}
+
+.auth-form-shell input,
+.auth-form-shell button {
+  font: inherit;
+}
+
+.auth-social-stack {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.65rem;
+}
+
+.auth-social-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  min-height: 48px;
+  padding: 0 1rem;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.auth-social-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(105, 168, 255, 0.28);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.auth-social-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.auth-social-icon.google {
+  color: #7ce6ff;
+}
+
+.auth-social-icon.apple {
+  color: #f4f8ff;
+}
+
+.auth-separator {
+  position: relative;
+  margin: 1.35rem 0 1.05rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.auth-separator::before,
+.auth-separator::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: calc(50% - 92px);
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.auth-separator::before {
+  left: 0;
+}
+
+.auth-separator::after {
+  right: 0;
+}
+
+.auth-field-group {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.95rem;
+}
+
+.auth-preview-stack {
+  margin-top: 0.9rem;
+}
+
+.auth-preview-stack .auth-field-group {
+  margin-top: 0.8rem;
+}
+
+.auth-preview-stack .auth-field-group:first-child {
+  margin-top: 0;
+}
+
+.auth-field-group label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.auth-input-shell {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(244, 248, 255, 0.56);
+}
+
+.auth-input-shell.password {
+  letter-spacing: 0.25em;
+  font-size: 1.05rem;
+}
+
+.auth-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 1rem 0 1.3rem;
+}
+
+.auth-check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.auth-checkbox-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+}
+
+.auth-checkbox-input::after {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border: 2px solid #ffffff;
+  border-top: none;
+  border-right: none;
+  transform: rotate(-45deg) scale(0);
+  transition: transform 140ms ease;
+}
+
+.auth-checkbox-input:checked {
+  background: linear-gradient(180deg, #5d97ff 0%, #2fa2ff 100%);
+  border-color: rgba(93, 151, 255, 0.78);
+  box-shadow: 0 0 0 1px rgba(93, 151, 255, 0.16);
+}
+
+.auth-checkbox-input:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+
+.auth-checkbox-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 162, 255, 0.12);
+}
+
+.auth-forgot-link,
+.auth-inline-link {
+  color: #5d97ff;
+  text-decoration: none;
+}
+
+.auth-forgot-link {
+  font-size: 0.92rem;
+}
+
+.auth-submit-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  border-radius: 16px;
+  border: none;
+  background: linear-gradient(90deg, #7357ff 0%, #2fa2ff 100%);
+  box-shadow: 0 14px 38px rgba(76, 138, 244, 0.3);
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  appearance: none;
+}
+
+.auth-bottom-copy {
+  margin-top: 1.15rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.auth-inline-link {
+  font-weight: 700;
+}
+
+.auth-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.auth-trust-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.auth-trust-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--teal), var(--blue));
+  box-shadow: 0 0 0 6px rgba(24, 209, 199, 0.08);
 }
 
 div[data-testid="stTextArea"] textarea,
@@ -2631,8 +5472,198 @@ div[data-testid="stRadio"] label {
   font-weight: 600 !important;
 }
 
+div[data-testid="stForm"] div[data-baseweb="base-input"],
+div[data-testid="stForm"] div[data-baseweb="base-input"] > div,
+div[data-testid="stForm"] div[data-baseweb="textarea"],
+div[data-testid="stForm"] div[data-baseweb="select"] > div {
+  border: 1.5px solid transparent !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="base-input"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="textarea"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="select"] > div:focus-within {
+  box-shadow: 0 0 0 1px rgba(117, 231, 255, 0.22) !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextInput"] input,
+div[data-testid="stForm"] div[data-testid="stTextArea"] textarea,
+div[data-testid="stForm"] div[data-testid="stSelectbox"] input {
+  background: transparent !important;
+  color: #f5fbff !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextInput"] input::placeholder,
+div[data-testid="stForm"] div[data-testid="stTextArea"] textarea::placeholder {
+  color: rgba(219, 231, 250, 0.54) !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextArea"] textarea {
+  min-height: 176px !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stTextArea"] label,
+div[data-testid="stForm"] div[data-testid="stTextInput"] label,
+div[data-testid="stForm"] div[data-testid="stSelectbox"] label {
+  font-family: "Sora", sans-serif !important;
+  font-weight: 700 !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"],
+div[data-testid="stForm"] div[data-baseweb="input"] > div,
+div[data-testid="stForm"] div[data-baseweb="textarea"],
+div[data-testid="stForm"] div[data-baseweb="select"] > div,
+div[data-testid="stForm"] [data-testid="stTextInputRootElement"],
+div[data-testid="stForm"] [data-testid="stTextAreaRootElement"] {
+  border: 1.5px solid transparent !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="textarea"]:focus-within,
+div[data-testid="stForm"] div[data-baseweb="select"] > div:focus-within {
+  box-shadow: 0 0 0 1px rgba(117, 231, 255, 0.22) !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"] input,
+div[data-testid="stForm"] div[data-baseweb="textarea"] textarea,
+div[data-testid="stForm"] div[data-baseweb="select"] input {
+  background: transparent !important;
+  border: none !important;
+  color: #f5fbff !important;
+}
+
+div[data-testid="stForm"] div[data-baseweb="input"] input {
+  min-height: 50px !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] button {
+  min-height: 52px;
+  border: none !important;
+  border-radius: 18px !important;
+  color: #ffffff !important;
+  background: linear-gradient(180deg, rgba(115, 87, 255, 0.95), rgba(47, 162, 255, 0.98)) !important;
+  box-shadow: 0 0 26px rgba(78, 143, 255, 0.22) !important;
+  font-weight: 700 !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] button:hover {
+  filter: brightness(1.03);
+  box-shadow: 0 0 32px rgba(78, 143, 255, 0.28) !important;
+}
+
 div[data-testid="stNumberInput"] button {
   color: var(--muted) !important;
+}
+
+div[data-testid="stFileUploader"] {
+  margin: 1.15rem 0 1rem;
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] {
+  border: 1.5px solid transparent !important;
+  border-radius: 22px !important;
+  padding: 0.9rem 1rem !important;
+  background:
+    linear-gradient(180deg, rgba(7, 14, 28, 0.99), rgba(6, 12, 24, 0.97)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box !important;
+  box-shadow:
+    0 0 0 1px rgba(68, 157, 255, 0.08),
+    0 0 26px rgba(17, 225, 245, 0.08),
+    0 14px 34px rgba(0, 0, 0, 0.18) !important;
+  transition: box-shadow 180ms ease, transform 180ms ease, filter 180ms ease !important;
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"]:hover {
+  box-shadow:
+    0 0 0 1px rgba(17, 225, 245, 0.18),
+    0 0 30px rgba(79, 123, 255, 0.12),
+    0 18px 38px rgba(0, 0, 0, 0.22) !important;
+  filter: brightness(1.02);
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"] {
+  color: #f4f8ff !important;
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"] svg {
+  color: #73d7ff !important;
+  stroke: currentColor !important;
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"] p,
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"] span,
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] small {
+  color: inherit !important;
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] small {
+  color: rgba(220, 233, 255, 0.66) !important;
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] button {
+  min-height: 44px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1.5px solid transparent !important;
+  border-radius: 18px !important;
+  color: #eef5ff !important;
+  background:
+    linear-gradient(180deg, rgba(10, 16, 28, 0.98), rgba(8, 13, 24, 0.96)) padding-box,
+    linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box !important;
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.08),
+    0 10px 24px rgba(0, 0, 0, 0.18) !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+div[data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"] button:hover {
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.16),
+    0 12px 28px rgba(0, 0, 0, 0.22) !important;
+  filter: brightness(1.03);
+}
+
+.st-key-task_architect_upload_generate {
+  margin-top: 1.2rem;
+}
+
+.st-key-task_architect_upload_generate div.stButton > button,
+.st-key-task_architect_upload_generate button {
+  min-height: 44px !important;
+  border: 1.5px solid transparent !important;
+  border-radius: 18px !important;
+  color: #eef5ff !important;
+  background:
+    linear-gradient(180deg, rgba(109, 83, 255, 0.98), rgba(51, 169, 255, 0.98)) padding-box,
+    linear-gradient(90deg, rgba(129, 89, 255, 0.98), rgba(42, 191, 234, 0.98)) border-box !important;
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.1),
+    0 14px 30px rgba(59, 111, 255, 0.2) !important;
+  font-family: "Sora", sans-serif !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+}
+
+.st-key-task_architect_upload_generate div.stButton > button:hover,
+.st-key-task_architect_upload_generate button:hover {
+  box-shadow:
+    0 0 0 1px rgba(117, 231, 255, 0.16),
+    0 18px 36px rgba(59, 111, 255, 0.26) !important;
+  filter: brightness(1.04);
 }
 
 div.stButton > button,
@@ -2724,9 +5755,39 @@ div[data-testid="stAlert"] {
 }
 
 div[data-testid="stExpander"] {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1.5px solid transparent !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, rgba(155, 92, 255, 0.5) 0%, rgba(100, 162, 255, 0.34) 52%, rgba(24, 209, 199, 0.36) 100%) border-box !important;
+  box-shadow: none !important;
+  overflow: hidden;
+  margin-top: 1rem;
+}
+
+div[data-testid="stExpander"] details,
+div[data-testid="stExpander"] > div {
+  background: transparent !important;
+}
+
+div[data-testid="stExpander"] summary {
+  min-height: 56px;
+  align-items: center;
+}
+
+div[data-testid="stExpander"] summary p {
+  color: #f5fbff !important;
+  font-weight: 700 !important;
+}
+
+.faq-empty-box {
+  min-height: 56px;
+  margin-top: 1rem;
+  border: 1.5px solid transparent;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+    linear-gradient(90deg, rgba(155, 92, 255, 0.5) 0%, rgba(100, 162, 255, 0.34) 52%, rgba(24, 209, 199, 0.36) 100%) border-box;
 }
 
 @media (max-width: 1100px) {
@@ -2762,6 +5823,10 @@ div[data-testid="stExpander"] {
     flex-direction: column;
   }
 
+  .contact-right-balance {
+    min-height: auto;
+  }
+
   .home-proof-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2785,8 +5850,59 @@ div[data-testid="stExpander"] {
 
 @media (max-width: 900px) {
   .kpi-grid,
-  .detail-grid {
+  .detail-grid,
+  .ai-forecast-grid,
+  .guide-how-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .task-architect-hero {
+    padding: 1.25rem 1.2rem 1.4rem;
+    border-radius: 24px;
+  }
+
+  .task-architect-parameter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-modules-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-showcase {
+    flex-direction: column;
+  }
+
+  .pricing-showcase .pricing-plan-card {
+    max-width: none;
+  }
+
+  .about-mv-grid,
+  .about-values-grid,
+  .about-team-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-timeline::before {
+    left: 18px;
+    transform: none;
+  }
+
+  .about-timeline-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 0.9rem;
+  }
+
+  .about-timeline-axis {
+    grid-column: 1;
+  }
+
+  .about-timeline-side {
+    grid-column: 2;
+  }
+
+  .about-timeline-row .about-timeline-side:empty {
+    display: none;
   }
 
   .metric-showcase-grid,
@@ -2797,6 +5913,10 @@ div[data-testid="stExpander"] {
   .command-bar-grid {
     grid-template-columns: 1fr;
     justify-items: center;
+  }
+
+  .ai-forecast-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .command-bar-copy,
@@ -2830,9 +5950,26 @@ div[data-testid="stExpander"] {
 
   .kpi-grid,
   .detail-grid,
+  .ai-forecast-grid,
+  .guide-modules-grid,
+  .guide-how-grid,
   .metric-showcase-grid,
   .process-grid {
     grid-template-columns: 1fr;
+  }
+
+  .about-mv-grid,
+  .about-values-grid,
+  .about-team-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .about-team-head {
+    justify-content: center;
+  }
+
+  .about-team-section {
+    text-align: center;
   }
 
   .hero-card,
@@ -2841,6 +5978,12 @@ div[data-testid="stExpander"] {
   .page-hero-card,
   .dashboard-banner {
     padding: 1.45rem;
+  }
+
+  .task-architect-panel,
+  .task-architect-empty {
+    padding-left: 1.2rem;
+    padding-right: 1.2rem;
   }
 
   .footer-link-grid {
@@ -2869,9 +6012,44 @@ div[data-testid="stExpander"] {
     align-items: flex-start;
   }
 
+  .footer-language-shell {
+    margin-right: 0;
+  }
+
   .floating-shortcut-wrap {
     left: 0.7rem;
     bottom: 0.8rem;
+  }
+
+  .about-proto-logo-shell {
+    width: min(100%, 228px);
+    height: 146px;
+  }
+
+  .about-mv-card,
+  .about-timeline-card,
+  .about-member-card {
+    padding-left: 1.15rem;
+    padding-right: 1.15rem;
+  }
+
+  .ai-forecast-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-forecast-process-card,
+  .ai-forecast-card {
+    padding-left: 1.2rem;
+    padding-right: 1.2rem;
+  }
+
+  .guide-activity-item {
+    grid-template-columns: auto 1fr;
+  }
+
+  .guide-activity-time {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 </style>
@@ -2890,11 +6068,101 @@ def _get_query_param(name: str, default: str) -> str:
     return str(value)
 
 
+def _get_query_flag(name: str) -> bool:
+    return _get_query_param(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _set_query_page(page: str) -> None:
+    language_code = st.session_state.get("saas_language_code", "en")
     try:
         st.query_params["page"] = page
+        st.query_params["lang"] = language_code
     except Exception:
-        st.experimental_set_query_params(page=page)
+        st.experimental_set_query_params(page=page, lang=language_code)
+
+
+def _sync_auth_email_from_query() -> None:
+    auth_email = _get_query_param("auth_email", "").strip()
+    if auth_email:
+        st.session_state.saas_user_email = auth_email
+
+
+def _sync_contact_email_from_query() -> None:
+    contact_email = _get_query_param("newsletter_email", "").strip()
+    if contact_email:
+        st.session_state.contact_email = contact_email
+
+
+def _sync_registration_email_from_query() -> None:
+    registration_email = _get_query_param("register_email", "").strip()
+    if registration_email:
+        st.session_state.registration_email = registration_email
+        st.session_state.saas_user_email = registration_email
+
+
+def _sync_language_from_query() -> None:
+    language_code = _get_query_param("lang", "en").strip() or "en"
+    if language_code not in SUPPORTED_LANGUAGE_CODES:
+        language_code = "en"
+    st.session_state.saas_language_code = language_code
+    st.session_state.saas_language = LANGUAGE_LABELS.get(language_code, "English")
+
+
+def _sync_newsletter_subscription_flow(page: str) -> None:
+    if page != "subscription-confirmation":
+        return
+
+    recipient_email = _get_query_param("newsletter_email", "").strip()
+    if recipient_email:
+        st.session_state.contact_email = recipient_email
+
+    confirmed = _get_query_flag("newsletter_confirmed")
+    st.session_state.newsletter_confirmed = confirmed
+    if confirmed:
+        st.session_state.newsletter_delivery_status = "confirmed"
+        st.session_state.newsletter_delivery_message = f"{recipient_email} has been confirmed for certAIn updates."
+        return
+
+    if not recipient_email:
+        return
+
+    request_key = f"{recipient_email}|{st.session_state.get('saas_language_code', 'en')}"
+    if st.session_state.get("newsletter_last_request_key") == request_key:
+        return
+
+    confirmation_link = build_subscription_confirmation_link(
+        recipient_email,
+        settings.app_base_url,
+        lang=st.session_state.get("saas_language_code", "en"),
+    )
+    result = send_subscription_confirmation_email(recipient_email, confirmation_link, settings)
+    if result.sent:
+        st.session_state.newsletter_last_request_key = request_key
+    st.session_state.newsletter_delivery_status = result.status
+    st.session_state.newsletter_delivery_message = result.message
+
+
+def _sync_registration_flow(page: str) -> None:
+    if page != "registration-confirmation":
+        return
+
+    recipient_email = _get_query_param("register_email", "").strip()
+    if recipient_email:
+        st.session_state.registration_email = recipient_email
+        st.session_state.saas_user_email = recipient_email
+
+    if not recipient_email:
+        return
+
+    request_key = f"{recipient_email}|{st.session_state.get('saas_language_code', 'en')}"
+    if st.session_state.get("registration_last_request_key") == request_key:
+        return
+
+    result = send_registration_confirmation_email(recipient_email, settings)
+    if result.sent:
+        st.session_state.registration_last_request_key = request_key
+    st.session_state.registration_delivery_status = result.status
+    st.session_state.registration_delivery_message = result.message
 
 
 def _resolve_page() -> str:
@@ -2902,8 +6170,13 @@ def _resolve_page() -> str:
     return page if page in PAGE_TITLES else "home"
 
 
-def _href(page: str) -> str:
-    return f"?page={page}"
+def _href(page: str, lang: str | None = None) -> str:
+    language_code = lang or st.session_state.get("saas_language_code", "en")
+    return f"?page={page}&lang={language_code}"
+
+
+def _trial_href() -> str:
+    return _href("login")
 
 
 def _is_dashboard_page(page: str) -> bool:
@@ -2912,6 +6185,681 @@ def _is_dashboard_page(page: str) -> bool:
 
 def _top_nav_active_key(page: str) -> str:
     return "dashboard" if _is_dashboard_page(page) else page
+
+
+def _github_profile_href() -> str:
+    email = st.session_state.get("saas_user_email", "").strip().lower()
+    if not email or "@" not in email:
+        return FOOTER_SOCIAL_LINKS["github"]
+
+    local_part = email.split("@", 1)[0]
+    username = re.sub(r"[^a-z0-9-]+", "-", local_part)
+    username = re.sub(r"-{2,}", "-", username).strip("-")[:39]
+    if not username:
+        return FOOTER_SOCIAL_LINKS["github"]
+    return f"https://github.com/{username}"
+
+
+def _assistant_profile(page: str) -> dict[str, Any]:
+    if page == "home":
+        return {
+            "title": "Platform Guide",
+            "summary": "Use this space to understand the product story, core workflow, and where to begin.",
+            "suggestions": [
+                "What can certAIn do?",
+                "Where should I start?",
+                "Explain the platform flow",
+            ],
+        }
+    if page == "product":
+        return {
+            "title": "Product Walkthrough",
+            "summary": "This page explains how certAIn connects planning, forecasting, simulation, and reporting.",
+            "suggestions": [
+                "Summarize the product",
+                "What makes this different?",
+                "How do the modules connect?",
+            ],
+        }
+    if page == "forecasting":
+        return {
+            "title": "Forecasting Help",
+            "summary": "This page focuses on predictive risk signals, model evidence, and earlier intervention.",
+            "suggestions": [
+                "Explain forecasting outputs",
+                "What is the bundled model?",
+                "How should I present this page?",
+            ],
+        }
+    if page == "monte-carlo":
+        return {
+            "title": "Monte Carlo Help",
+            "summary": "This page shows schedule uncertainty, completion ranges, and confidence-based delivery planning.",
+            "suggestions": [
+                "What does Monte Carlo show?",
+                "How do I explain confidence levels?",
+                "What should I look at first?",
+            ],
+        }
+    if page == "pricing":
+        return {
+            "title": "Pricing Help",
+            "summary": "Use this page to compare packages and guide trial or enterprise conversations.",
+            "suggestions": [
+                "Which plan fits a small team?",
+                "Explain the trial path",
+                "What should I say about enterprise?",
+            ],
+        }
+    if page == "login":
+        return {
+            "title": "Access Help",
+            "summary": "This page supports the demo entry flow before users continue into the platform experience.",
+            "suggestions": [
+                "How does the sign-in flow work?",
+                "Where do these buttons go?",
+                "What should a user do next?",
+            ],
+        }
+    if page == "about":
+        return {
+            "title": "Team Story",
+            "summary": "Use this page to explain the capstone story, product vision, and why the platform matters.",
+            "suggestions": [
+                "Summarize the project story",
+                "How should I introduce certAIn?",
+                "What problem does this solve?",
+            ],
+        }
+    if page == "contact":
+        return {
+            "title": "Contact Help",
+            "summary": "This page is the handoff point for questions, demos, and follow-up conversations.",
+            "suggestions": [
+                "What should happen after contact?",
+                "How do I present this page?",
+                "What is the next step after a demo?",
+            ],
+        }
+    if _is_dashboard_page(page):
+        return {
+            "title": PAGE_TITLES.get(page, "Workspace"),
+            "summary": "You are inside the working platform where teams generate plans, inspect risks, compare scenarios, and prepare executive outputs.",
+            "suggestions": [
+                "Explain this workspace page",
+                "What should I do next here?",
+                "How do I present this module?",
+            ],
+        }
+    return {
+        "title": PAGE_TITLES.get(page, "Platform"),
+        "summary": "I can help explain the current page, point to the next step, or answer questions about the product workflow.",
+        "suggestions": [
+            "Explain this page",
+            "What should I do next?",
+            "Summarize certAIn",
+        ],
+    }
+
+
+def _render_command_palette(active_page: str) -> None:
+    items_markup = "".join(
+        dedent(
+            f"""
+            <a
+              href="{_href(page)}"
+              class="command-palette-item {'active' if page == active_page else ''}"
+              data-command-item
+              data-command-text="{(group + ' ' + label + ' ' + description).lower()}"
+            >
+              <div class="command-palette-item-copy">
+                <span class="command-palette-item-title">{label}</span>
+                <span class="command-palette-item-desc">{description}</span>
+              </div>
+              <span class="command-palette-item-group">{group}</span>
+            </a>
+            """
+        ).strip()
+        for group, page, label, description in COMMAND_PALETTE_ITEMS
+    )
+    st.markdown(
+        dedent(
+            f"""
+            <div class="command-palette-overlay" data-command-palette aria-hidden="true">
+              <div class="command-palette-backdrop" data-command-close="true"></div>
+              <div class="command-palette-card" role="dialog" aria-modal="true" aria-label="Quick command search">
+                <div class="command-palette-head">
+                  <div class="command-palette-title">
+                    <strong>Quick command search</strong>
+                    <span>Press ⌘K on Mac or Ctrl+K on Windows/Linux from any platform page.</span>
+                  </div>
+                  <button type="button" class="command-palette-close" data-command-close="true" aria-label="Close command search">×</button>
+                </div>
+                <div class="command-palette-search">
+                  <input
+                    class="command-palette-input"
+                    type="text"
+                    placeholder="Search pages, modules, and actions"
+                    data-command-input
+                  />
+                </div>
+                <div class="command-palette-list" data-command-list>
+                  {items_markup}
+                  <div class="command-palette-empty" data-command-empty hidden>No matching command found.</div>
+                </div>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _mount_command_palette_shortcuts() -> None:
+    components.html(
+        """
+        <script>
+        (() => {
+          const parentWindow = window.parent;
+          const parentDocument = parentWindow.document;
+
+          const getPalette = () => parentDocument.querySelector("[data-command-palette]");
+          const getInput = () => parentDocument.querySelector("[data-command-input]");
+          const getItems = () => Array.from(parentDocument.querySelectorAll("[data-command-item]"));
+          const getEmpty = () => parentDocument.querySelector("[data-command-empty]");
+
+          const filterItems = () => {
+            const input = getInput();
+            if (!input) return;
+            const term = (input.value || "").trim().toLowerCase();
+            let visibleCount = 0;
+            getItems().forEach((item) => {
+              const haystack = item.dataset.commandText || item.textContent.toLowerCase();
+              const show = !term || haystack.includes(term);
+              item.style.display = show ? "" : "none";
+              if (show) visibleCount += 1;
+            });
+            const empty = getEmpty();
+            if (empty) empty.hidden = visibleCount > 0;
+          };
+
+          const openPalette = () => {
+            const palette = getPalette();
+            if (!palette) return;
+            palette.classList.add("is-open");
+            palette.setAttribute("aria-hidden", "false");
+            parentDocument.body.classList.add("palette-open");
+            parentWindow.requestAnimationFrame(() => {
+              const input = getInput();
+              if (input) {
+                input.focus();
+                input.select();
+              }
+              filterItems();
+            });
+          };
+
+          const closePalette = () => {
+            const palette = getPalette();
+            if (!palette) return;
+            palette.classList.remove("is-open");
+            palette.setAttribute("aria-hidden", "true");
+            parentDocument.body.classList.remove("palette-open");
+          };
+
+          const attachHandlers = () => {
+            if (parentWindow.__certainPaletteInit) return;
+
+            parentDocument.addEventListener("click", (event) => {
+              const trigger = event.target.closest("[data-command-trigger]");
+              if (trigger) {
+                event.preventDefault();
+                openPalette();
+                return;
+              }
+
+              const closer = event.target.closest("[data-command-close]");
+              if (closer) {
+                event.preventDefault();
+                closePalette();
+              }
+            });
+
+            parentDocument.addEventListener("input", (event) => {
+              if (event.target.matches("[data-command-input]")) {
+                filterItems();
+              }
+            });
+
+            parentDocument.addEventListener("keydown", (event) => {
+              const isShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
+              if (isShortcut) {
+                event.preventDefault();
+                const palette = getPalette();
+                if (palette && palette.classList.contains("is-open")) {
+                  closePalette();
+                } else {
+                  openPalette();
+                }
+                return;
+              }
+
+              if (event.key === "Escape") {
+                closePalette();
+                return;
+              }
+
+              if (event.key === "Enter") {
+                const palette = getPalette();
+                if (!palette || !palette.classList.contains("is-open")) return;
+                const firstVisible = getItems().find((item) => item.style.display !== "none");
+                if (firstVisible) {
+                  event.preventDefault();
+                  firstVisible.click();
+                }
+              }
+            });
+
+            parentWindow.__certainPaletteInit = true;
+          };
+
+          const syncPalette = () => {
+            if (!getPalette()) {
+              parentWindow.setTimeout(syncPalette, 120);
+              return;
+            }
+            attachHandlers();
+            filterItems();
+          };
+
+          syncPalette();
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _mount_page_translation() -> None:
+    widget_code = LANGUAGE_WIDGET_CODES.get(
+        st.session_state.get("saas_language_code", "en"),
+        "en",
+    )
+    included_languages = ",".join(widget_code for _, _, widget_code in LANGUAGE_OPTIONS)
+    components.html(
+        dedent(
+            f"""
+            <script>
+            (() => {{
+              const parentWindow = window.parent;
+              const parentDocument = parentWindow.document;
+              const targetLanguage = "{widget_code}";
+              const includedLanguages = "{included_languages}";
+
+              const ensureContainer = () => {{
+                let container = parentDocument.getElementById("certain_google_translate_element");
+                if (!container) {{
+                  container = parentDocument.createElement("div");
+                  container.id = "certain_google_translate_element";
+                  container.style.display = "none";
+                  parentDocument.body.appendChild(container);
+                }}
+                return container;
+              }};
+
+              const ensureGoogleInit = () => {{
+                if (parentWindow.google?.translate?.TranslateElement && !parentWindow.__certainTranslateWidgetReady) {{
+                  ensureContainer();
+                  new parentWindow.google.translate.TranslateElement(
+                    {{
+                      pageLanguage: "en",
+                      includedLanguages,
+                      autoDisplay: false,
+                      layout: parentWindow.google.translate.TranslateElement.InlineLayout.SIMPLE,
+                    }},
+                    "certain_google_translate_element",
+                  );
+                  parentWindow.__certainTranslateWidgetReady = true;
+                }}
+              }};
+
+              const persistLanguage = () => {{
+                const languagePath = targetLanguage === "en" ? "/auto/en" : `/auto/${{targetLanguage}}`;
+                parentDocument.cookie = `googtrans=${{languagePath}};path=/;SameSite=Lax`;
+                try {{
+                  parentWindow.localStorage.setItem("certain.language", targetLanguage);
+                }} catch (error) {{
+                  // Ignore storage issues in restricted browser contexts.
+                }}
+              }};
+
+              const applyLanguage = () => {{
+                persistLanguage();
+                parentDocument.documentElement.lang = targetLanguage === "en" ? "en" : targetLanguage;
+                const combo = parentDocument.querySelector(".goog-te-combo");
+                if (!combo) return false;
+                combo.value = targetLanguage === "en" ? "" : targetLanguage;
+                combo.dispatchEvent(new parentWindow.Event("change", {{ bubbles: true }}));
+                if (targetLanguage === "en") {{
+                  parentWindow.setTimeout(() => {{
+                    combo.value = "";
+                    combo.dispatchEvent(new parentWindow.Event("change", {{ bubbles: true }}));
+                  }}, 60);
+                }}
+                return true;
+              }};
+
+              const bootTranslation = () => {{
+                ensureGoogleInit();
+                if (applyLanguage()) return;
+                parentWindow.setTimeout(bootTranslation, 180);
+              }};
+
+              if (!parentWindow.__certainTranslateScriptLoaded) {{
+                parentWindow.googleTranslateElementInit = () => {{
+                  parentWindow.__certainTranslateScriptLoaded = true;
+                  bootTranslation();
+                }};
+                const script = parentDocument.createElement("script");
+                script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+                script.async = true;
+                parentDocument.body.appendChild(script);
+                parentWindow.__certainTranslateScriptLoaded = true;
+              }}
+
+              bootTranslation();
+            }})();
+            </script>
+            """
+        ),
+        height=0,
+        width=0,
+    )
+
+
+def _render_ai_assistant(active_page: str) -> None:
+    profile = _assistant_profile(active_page)
+    suggestions_markup = "".join(
+        f'<button type="button" class="ai-assistant-chip" data-ai-suggestion="{suggestion}">{suggestion}</button>'
+        for suggestion in profile["suggestions"]
+    )
+    st.markdown(
+        dedent(
+            f"""
+            <div class="ai-assistant-shell" data-ai-assistant data-ai-page="{active_page}">
+              <div class="ai-assistant-panel" data-ai-assistant-panel aria-hidden="true">
+                <div class="ai-assistant-head">
+                  <div class="ai-assistant-head-copy">
+                    <span class="ai-assistant-kicker">AI Assistant</span>
+                    <strong>{profile["title"]}</strong>
+                    <span>{profile["summary"]}</span>
+                  </div>
+                  <button type="button" class="ai-assistant-close" data-ai-close="true" aria-label="Close AI assistant">×</button>
+                </div>
+                <div class="ai-assistant-suggestions">
+                  {suggestions_markup}
+                </div>
+                <div class="ai-assistant-messages" data-ai-messages></div>
+                <form class="ai-assistant-form" data-ai-form>
+                  <input
+                    class="ai-assistant-input"
+                    type="text"
+                    placeholder="Ask about risks, pricing, forecasting, or next steps"
+                    data-ai-input
+                  />
+                  <button type="submit" class="ai-assistant-send">Send</button>
+                </form>
+              </div>
+              <button type="button" class="ai-assistant-launcher" data-ai-toggle="true" aria-label="Open AI assistant">
+                <span class="ai-assistant-launcher-icon">✦</span>
+                <span class="ai-assistant-launcher-copy">
+                  <strong>AI Assistant</strong>
+                  <span>Ask {_brand_name_html()}</span>
+                </span>
+              </button>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _mount_ai_assistant(active_page: str) -> None:
+    profile_json = json.dumps(_assistant_profile(active_page))
+    active_page_json = json.dumps(active_page)
+    components.html(
+        dedent(
+            f"""
+            <script>
+            (() => {{
+              const parentWindow = window.parent;
+              const parentDocument = parentWindow.document;
+              const profile = {profile_json};
+              const activePage = {active_page_json};
+              const storeKey = "certain.ai.assistant.messages";
+              const openKey = "certain.ai.assistant.open";
+
+              const escapeHtml = (value) =>
+                String(value)
+                  .replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(/>/g, "&gt;")
+                  .replace(/"/g, "&quot;")
+                  .replace(/'/g, "&#39;");
+
+              const getShell = () => parentDocument.querySelector("[data-ai-assistant]");
+              const getPanel = () => parentDocument.querySelector("[data-ai-assistant-panel]");
+              const getMessages = () => parentDocument.querySelector("[data-ai-messages]");
+              const getInput = () => parentDocument.querySelector("[data-ai-input]");
+
+              const readMessages = () => {{
+                try {{
+                  return JSON.parse(parentWindow.sessionStorage.getItem(storeKey) || "[]");
+                }} catch (error) {{
+                  return [];
+                }}
+              }};
+
+              const saveMessages = (messages) => {{
+                const trimmed = messages.slice(-14);
+                try {{
+                  parentWindow.sessionStorage.setItem(storeKey, JSON.stringify(trimmed));
+                }} catch (error) {{
+                  // Ignore storage issues in restricted browsers.
+                }}
+              }};
+
+              const introMessage = () =>
+                `Hi, I'm your certAIn AI assistant. You're on ${{profile.title}}. ${{profile.summary}}`;
+
+              const ensureMessages = () => {{
+                const current = readMessages();
+                if (current.length) return current;
+                const seeded = [{{ role: "assistant", text: introMessage() }}];
+                saveMessages(seeded);
+                return seeded;
+              }};
+
+              const renderMessages = () => {{
+                const messages = ensureMessages();
+                const container = getMessages();
+                if (!container) return;
+                container.innerHTML = messages
+                  .map(
+                    (message) =>
+                      `<div class="ai-assistant-message ${{message.role}}"><span>${{escapeHtml(message.text)}}</span></div>`,
+                  )
+                  .join("");
+                container.scrollTop = container.scrollHeight;
+              }};
+
+              const nextStepReply = () => {{
+                if (activePage === "home") {{
+                  return "Start with Product for the platform story, then move to AI Forecasting or Monte Carlo to show the evidence-driven workflow.";
+                }}
+                if (activePage === "pricing") {{
+                  return "Use Pricing to position the trial flow first, then move into the dashboard or simulation pages to demonstrate value.";
+                }}
+                if (activePage === "login") {{
+                  return "From here, the sign-in and register actions move users into the pricing flow before they continue deeper into the platform.";
+                }}
+                if (activePage === "forecasting" || activePage === "monte-carlo") {{
+                  return "Highlight the key metric first, explain how the result supports better commitments, then connect it to dashboard decisions or scenario testing.";
+                }}
+                if (activePage === "about" || activePage === "contact") {{
+                  return "Use this page as a closer: summarize the story, invite the next conversation, and route viewers back into the working product pages if needed.";
+                }}
+                return "Lead with the key signal on this page, explain the decision it supports, and then move to the next workspace or reporting screen.";
+              }};
+
+              const composeReply = (message) => {{
+                const text = message.toLowerCase();
+
+                if (/pricing|plan|trial|enterprise|team/.test(text)) {{
+                  return "The pricing flow is best framed as a guided entry point: start with Team Pilot for smaller evaluations and position Enterprise for broader governance and rollout support.";
+                }}
+
+                if (/forecast|predict|prediction|delay|deadline/.test(text)) {{
+                  return "Forecasting helps explain which signals suggest delay or delivery risk early enough for teams to intervene before commitments slip.";
+                }}
+
+                if (/monte|simulation|probability|confidence/.test(text)) {{
+                  return "Monte Carlo is strongest when you describe it as a range-based planning tool: it shows likely finish windows and confidence levels instead of a single brittle date.";
+                }}
+
+                if (/risk|classifier|score|driver/.test(text)) {{
+                  return "Use the risk views to explain what is driving exposure, which tasks or signals are contributing most, and where mitigation should start first.";
+                }}
+
+                if (/task|plan|dependency|dag|critical path/.test(text)) {{
+                  return "certAIn turns a plain-language brief into structured tasks, dependencies, and critical-path logic so teams can move from idea to defensible plan faster.";
+                }}
+
+                if (/upload|csv|file|import/.test(text)) {{
+                  return "Project Upload is presented as a guided intake experience in the product story, with CSV previewing and broader file support represented in the UI.";
+                }}
+
+                if (/summary|report|executive|stakeholder/.test(text)) {{
+                  return "The reporting flow is meant to translate technical forecast signals into business-ready summaries that stakeholders can review quickly.";
+                }}
+
+                if (/language|translate/.test(text)) {{
+                  return "The platform language can be changed from the language selector, and the selected language is carried across the shared platform pages.";
+                }}
+
+                if (/command|search|cmd\\+k|ctrl\\+k/.test(text)) {{
+                  return "Quick command search is available from the shortcut pill or with Command+K on Mac and Ctrl+K on Windows or Linux.";
+                }}
+
+                if (/what can you do|help|support|assist/.test(text)) {{
+                  return "I can explain the current page, suggest the next best step, summarize product capabilities, and help you present forecasts, risks, Monte Carlo results, pricing, or reporting.";
+                }}
+
+                if (/next|start|where should i begin|what should i do/.test(text)) {{
+                  return nextStepReply();
+                }}
+
+                if (/this page|what is this|where am i|here/.test(text)) {{
+                  return `This is the ${{profile.title}} page. ${{profile.summary}}`;
+                }}
+
+                return `You're on ${{profile.title}}. ${{profile.summary}} Ask me about forecasting, Monte Carlo, pricing, reporting, or the next best step.`;
+              }};
+
+              const updateOpenState = (open, focusInput = false) => {{
+                const shell = getShell();
+                const panel = getPanel();
+                if (!shell || !panel) return;
+                shell.classList.toggle("is-open", open);
+                panel.setAttribute("aria-hidden", open ? "false" : "true");
+                try {{
+                  parentWindow.sessionStorage.setItem(openKey, open ? "1" : "0");
+                }} catch (error) {{
+                  // Ignore storage issues in restricted browsers.
+                }}
+                if (open && focusInput) {{
+                  parentWindow.requestAnimationFrame(() => {{
+                    const input = getInput();
+                    if (input) input.focus();
+                  }});
+                }}
+              }};
+
+              const handlePrompt = (rawMessage) => {{
+                const message = (rawMessage || "").trim();
+                if (!message) return;
+                const messages = ensureMessages();
+                messages.push({{ role: "user", text: message }});
+                messages.push({{ role: "assistant", text: composeReply(message) }});
+                saveMessages(messages);
+                renderMessages();
+                const input = getInput();
+                if (input) {{
+                  input.value = "";
+                  input.focus();
+                }}
+                updateOpenState(true);
+              }};
+
+              const attachHandlers = () => {{
+                if (parentWindow.__certainAssistantInit) return;
+
+                parentDocument.addEventListener("click", (event) => {{
+                  const toggle = event.target.closest("[data-ai-toggle]");
+                  if (toggle) {{
+                    event.preventDefault();
+                    const shell = getShell();
+                    const isOpen = shell?.classList.contains("is-open");
+                    updateOpenState(!isOpen, true);
+                    renderMessages();
+                    return;
+                  }}
+
+                  const closeButton = event.target.closest("[data-ai-close]");
+                  if (closeButton) {{
+                    event.preventDefault();
+                    updateOpenState(false);
+                    return;
+                  }}
+
+                  const suggestion = event.target.closest("[data-ai-suggestion]");
+                  if (suggestion) {{
+                    event.preventDefault();
+                    handlePrompt(suggestion.dataset.aiSuggestion || suggestion.textContent || "");
+                  }}
+                }});
+
+                parentDocument.addEventListener("submit", (event) => {{
+                  if (!event.target.matches("[data-ai-form]")) return;
+                  event.preventDefault();
+                  const input = getInput();
+                  if (!input) return;
+                  handlePrompt(input.value);
+                }});
+
+                parentWindow.__certainAssistantInit = true;
+              }};
+
+              const syncAssistant = () => {{
+                if (!getShell()) {{
+                  parentWindow.setTimeout(syncAssistant, 120);
+                  return;
+                }}
+                attachHandlers();
+                renderMessages();
+                const shouldOpen = parentWindow.sessionStorage.getItem(openKey) === "1";
+                updateOpenState(shouldOpen);
+              }};
+
+              syncAssistant();
+            }})();
+            </script>
+            """
+        ),
+        height=0,
+        width=0,
+    )
 
 
 @st.cache_data
@@ -2936,22 +6884,55 @@ def _nav_logo_data_uri() -> str:
     return ""
 
 
+@st.cache_data
+def _image_data_uri(path: str) -> str:
+    image_path = Path(path)
+    if not image_path.exists():
+        return ""
+
+    mime_type = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(image_path.suffix.lower(), "application/octet-stream")
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _svg_data_uri(svg: str) -> str:
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def _brand_name_html() -> str:
+    return 'cert<span class="ai-gradient">AI</span>n'
+
+
+def _brand_name_in_text_html(text: str) -> str:
+    return html.escape(text).replace("certAIn", 'cert<span class="ai-gradient about-inline-ai">AI</span>n')
+
+
 def _brand_lockup(location: str, caption: str | None = None) -> str:
+    wordmark = f'<span class="brand-word brand-word-inline notranslate" translate="no">{_brand_name_html()}</span>'
     logo_uri = _logo_data_uri()
     if logo_uri:
         media = (
-            '<span class="brand-media">'
+            '<span class="brand-media with-wordmark">'
+            '<span class="brand-logo-shell">'
             f'<img src="{logo_uri}" class="brand-logo" alt="certAIn logo" />'
+            "</span>"
+            f"{wordmark}"
             "</span>"
         )
     else:
         media = (
-            '<span class="brand-media">'
+            '<span class="brand-media with-wordmark">'
             '<span class="brand-mark" aria-hidden="true">'
             '<span class="brand-triangle"></span>'
             '<span class="brand-core">A</span>'
             "</span>"
-            '<span class="brand-word">cert<span class="ai-gradient">AI</span>n</span>'
+            f"{wordmark}"
             "</span>"
         )
 
@@ -2983,7 +6964,7 @@ def _nav_brand_markup() -> str:
     return (
         f'<a class="nav-brand-zone" href="{_href("home")}">'
         f"{media}"
-        '<span class="nav-brand-word">cert<span class="nav-brand-accent">AI</span>n</span>'
+        f'<span class="nav-brand-word notranslate" translate="no">{_brand_name_html()}</span>'
         "</a>"
     )
 
@@ -3009,12 +6990,13 @@ def _footer_brand_markup() -> str:
     return (
         f'<a class="footer-brand-row" href="{_href("home")}">'
         f"{media}"
-        '<span class="footer-brand-wordmark">cert<span class="footer-brand-accent">AI</span>n</span>'
+        f'<span class="footer-brand-wordmark notranslate" translate="no">{_brand_name_html()}</span>'
         "</a>"
     )
 
 
 def _footer_social_icon_markup(platform: str, label: str) -> str:
+    href = _github_profile_href() if platform == "github" else FOOTER_SOCIAL_LINKS.get(platform, "#")
     icons = {
         "linkedin": (
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
@@ -3045,12 +7027,26 @@ def _footer_social_icon_markup(platform: str, label: str) -> str:
             '<path d="M10 15l5-3-5-3z"/>'
             "</svg>"
         ),
+        "instagram": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/>'
+            '<circle cx="12" cy="12" r="4.1"/>'
+            '<circle cx="17.3" cy="6.7" r="0.8" fill="currentColor" stroke="none"/>'
+            "</svg>"
+        ),
+        "facebook": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<path d="M14 8h3V4h-3c-3 0-5 2-5 5v3H6v4h3v4h4v-4h3.2l.8-4H13V9c0-.7.3-1 1-1z"/>'
+            "</svg>"
+        ),
     }
     icon = icons.get(platform, "")
     return (
-        f'<span class="footer-social-pill" aria-label="{label}" title="{label}">'
+        f'<a class="footer-social-pill" href="{href}" target="_blank" rel="noreferrer noopener" aria-label="{label}" title="{label}">'
         f'<span class="footer-social-icon">{icon}</span>'
-        "</span>"
+        "</a>"
     )
 
 
@@ -3118,7 +7114,32 @@ def _inject_styles() -> None:
     st.markdown(
         """
         <div class="saas-shell">
-          <div class="starfield" aria-hidden="true"></div>
+          <div class="particle-network" aria-hidden="true">
+            <div class="particle-group group-a">
+              <span class="particle-link" style="left:42px;top:40px;width:54px;transform:rotate(22deg);"></span>
+              <span class="particle-link" style="left:95px;top:62px;width:62px;transform:rotate(10deg);"></span>
+              <span class="particle-link" style="left:154px;top:73px;width:66px;transform:rotate(8deg);"></span>
+              <span class="particle-node teal" style="left:42px;top:40px;--size:10px;--pulse:4.8s;"></span>
+              <span class="particle-node blue" style="left:94px;top:61px;--size:8px;--pulse:5.7s;--delay:-1.2s;"></span>
+              <span class="particle-node soft" style="left:154px;top:72px;--size:6px;--pulse:6.4s;--delay:-0.8s;"></span>
+              <span class="particle-node soft" style="left:220px;top:82px;--size:5px;--pulse:5.4s;--delay:-2.4s;"></span>
+              <span class="particle-node violet" style="left:244px;top:18px;--size:6px;--pulse:7.1s;--delay:-3s;"></span>
+            </div>
+            <div class="particle-group group-b">
+              <span class="particle-link" style="left:52px;top:108px;width:58px;transform:rotate(-33deg);"></span>
+              <span class="particle-link" style="left:101px;top:75px;width:70px;transform:rotate(29deg);"></span>
+              <span class="particle-node blue" style="left:52px;top:108px;--size:9px;--pulse:5.1s;"></span>
+              <span class="particle-node teal" style="left:100px;top:74px;--size:8px;--pulse:6.2s;--delay:-1.6s;"></span>
+              <span class="particle-node soft" style="left:162px;top:109px;--size:5px;--pulse:5.8s;--delay:-0.9s;"></span>
+              <span class="particle-node soft" style="left:34px;top:152px;--size:4px;--pulse:6.6s;--delay:-2.2s;"></span>
+            </div>
+            <div class="particle-group group-c">
+              <span class="particle-link" style="left:70px;top:72px;width:54px;transform:rotate(-28deg);"></span>
+              <span class="particle-node blue" style="left:70px;top:72px;--size:7px;--pulse:5.3s;"></span>
+              <span class="particle-node violet" style="left:118px;top:46px;--size:5px;--pulse:6.9s;--delay:-1.4s;"></span>
+              <span class="particle-node soft" style="left:152px;top:64px;--size:4px;--pulse:7.4s;--delay:-3.2s;"></span>
+            </div>
+          </div>
           <div class="ambient-orb orb-a"></div>
           <div class="ambient-orb orb-b"></div>
           <div class="ambient-orb orb-c"></div>
@@ -3145,7 +7166,7 @@ def _inject_layout_state(active_page: str) -> None:
 def _render_nav(active_page: str) -> None:
     active_key = _top_nav_active_key(active_page)
     nav_links = "".join(
-        f'<a class="nav-link {"active" if page == active_key else ""}" href="{_href(page)}">{label}</a>'
+        f'<a class="nav-link {"active" if page == active_key else ""}" href="{_href("simulator" if page == "monte-carlo" else page)}">{label}</a>'
         for page, label in NAV_ITEMS
     )
     st.markdown(
@@ -3161,7 +7182,7 @@ def _render_nav(active_page: str) -> None:
                 {nav_links}
               </div>
               <div class="top-nav-meta">
-                <a href="{_href("dashboard")}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
+                <a href="{_trial_href()}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
               </div>
             </div>
             """
@@ -3201,7 +7222,7 @@ def _render_sidebar(active_page: str) -> None:
             """
             <div class="sidebar-divider"></div>
             <div class="sidebar-shortcut-wrap">
-              <div class="mini-pill sidebar-shortcut-pill"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></div>
+              <button type="button" class="mini-pill sidebar-shortcut-pill sidebar-shortcut-trigger" data-command-trigger="true" aria-label="Open quick command search"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></button>
               <div class="sidebar-mini-label sidebar-shortcut-caption">Quick command search</div>
             </div>
             """,
@@ -3228,6 +7249,52 @@ def _render_command_bar() -> None:
     )
 
 
+def _render_monte_carlo_explainer() -> None:
+    st.markdown(
+        """
+        <div class="page-shell">
+          <div class="page-grid">
+            <div class="glass page-hero-card">
+              <span class="kicker">Monte Carlo</span>
+              <h1 class="page-title">Replace one optimistic date with a defensible range.</h1>
+              <p class="page-copy">
+                Run repeated simulations to estimate completion distributions, surface safer commitments,
+                and identify how deadline risk changes under different scenarios.
+              </p>
+            </div>
+            <div class="glass page-hero-card">
+              <span class="eyebrow">Forecast anchors</span>
+              <div class="data-pair"><span>P50 commitment</span><strong>Balanced target</strong></div>
+              <div class="data-pair"><span>P80 commitment</span><strong>Safer promise</strong></div>
+              <div class="data-pair"><span>Delay probability</span><strong>Leadership signal</strong></div>
+              <div class="data-pair"><span>Main driver</span><strong>Mitigation focus</strong></div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_monte_carlo_lens() -> None:
+    _section_intro(
+        "Simulation lens",
+        "Monte Carlo is the credibility engine behind the dashboard",
+        "It transforms schedule uncertainty into metrics the audience can understand: mean completion, P50, P80, and exposure to the chosen deadline.",
+    )
+
+    st.markdown(
+        """
+        <div class="feature-grid">
+          <div class="feature-card"><h3>P50</h3><p>The most likely commitment point when normal delivery conditions hold.</p></div>
+          <div class="feature-card"><h3>P80</h3><p>A safer promise for executive communication when teams want higher certainty.</p></div>
+          <div class="feature-card"><h3>Delay drivers</h3><p>Critical-path frequency reveals which tasks deserve mitigation before launch.</p></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_floating_shortcut(active_page: str) -> None:
     if _is_dashboard_page(active_page):
         return
@@ -3235,7 +7302,7 @@ def _render_floating_shortcut(active_page: str) -> None:
     st.markdown(
         """
         <div class="floating-shortcut-wrap">
-          <div class="mini-pill sidebar-shortcut-pill"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></div>
+          <button type="button" class="mini-pill sidebar-shortcut-pill sidebar-shortcut-trigger" data-command-trigger="true" aria-label="Open quick command search"><span class="sidebar-shortcut-key">⌘K / Ctrl+K</span></button>
           <div class="sidebar-mini-label sidebar-shortcut-caption">Quick command search</div>
         </div>
         """,
@@ -3243,14 +7310,110 @@ def _render_floating_shortcut(active_page: str) -> None:
     )
 
 
-def _render_footer() -> None:
+def _render_footer(active_page: str) -> None:
+    globe_icon_uri = _svg_data_uri(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e8f1ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M3 12h18"/>
+          <path d="M12 3a14.5 14.5 0 0 1 0 18"/>
+          <path d="M12 3a14.5 14.5 0 0 0 0 18"/>
+        </svg>
+        """
+    )
+    flag_icon_uri = _svg_data_uri(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 19 13">
+          <rect width="19" height="13" fill="#B22234"/>
+          <rect y="1" width="19" height="1" fill="#ffffff"/>
+          <rect y="3" width="19" height="1" fill="#ffffff"/>
+          <rect y="5" width="19" height="1" fill="#ffffff"/>
+          <rect y="7" width="19" height="1" fill="#ffffff"/>
+          <rect y="9" width="19" height="1" fill="#ffffff"/>
+          <rect y="11" width="19" height="1" fill="#ffffff"/>
+          <rect width="8.2" height="7" fill="#3C3B6E"/>
+          <circle cx="1.3" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="3" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="4.7" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="6.4" cy="1.3" r="0.35" fill="#ffffff"/>
+          <circle cx="2.15" cy="2.45" r="0.35" fill="#ffffff"/>
+          <circle cx="3.85" cy="2.45" r="0.35" fill="#ffffff"/>
+          <circle cx="5.55" cy="2.45" r="0.35" fill="#ffffff"/>
+          <circle cx="1.3" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="3" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="4.7" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="6.4" cy="3.6" r="0.35" fill="#ffffff"/>
+          <circle cx="2.15" cy="4.75" r="0.35" fill="#ffffff"/>
+          <circle cx="3.85" cy="4.75" r="0.35" fill="#ffffff"/>
+          <circle cx="5.55" cy="4.75" r="0.35" fill="#ffffff"/>
+        </svg>
+        """
+    )
+    farsi_flag_icon_uri = _svg_data_uri(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 19 13">
+          <rect width="19" height="13" fill="#da1f26"/>
+          <rect width="19" height="8.6667" fill="#ffffff"/>
+          <rect width="19" height="4.3333" fill="#239f40"/>
+          <g fill="none" stroke="#d8a828" stroke-width="0.22" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9.5" cy="6.55" r="1.15" fill="#e3b63a" stroke="#c99512"/>
+            <path d="M9.5 4.6v-1.1M8.85 4.85l-.35-.85M10.15 4.85l.35-.85M8.25 5.3l-.8-.35M10.75 5.3l.8-.35M8.2 6.15H7.2M10.8 6.15h1M8.25 7l-.8.35M10.75 7l.8.35"/>
+            <path d="M7.95 8.35c.1-.6.55-.95 1.2-.95h1.25c.8 0 1.15.55 1.18 1.05"/>
+            <path d="M8.2 8.25l-.22.7M10.9 8.25l.28.68M8.9 7.4c-.22-.52-.18-1.05.12-1.45M10.05 7.32c.48-.18.78-.55.95-.98"/>
+            <path d="M6.65 8.95h5.7"/>
+            <path d="M8.15 5.15l.45-.75h1.8l.45.75"/>
+            <path d="M8.95 4.15l.55-.45.55.45"/>
+            <path d="M9.5 3.1l.28-.32.28.32"/>
+            <path d="M7.05 5.2c-.6.65-.9 1.45-.88 2.3M11.95 5.2c.58.65.9 1.45.88 2.3"/>
+          </g>
+        </svg>
+        """
+    )
+    flag_markup_by_code = {
+        "en": f'<img src="{flag_icon_uri}" alt="" />',
+        "fa": f'<img src="{farsi_flag_icon_uri}" alt="" />',
+        "iw": "🇮🇱",
+        "de": "🇩🇪",
+        "it": "🇮🇹",
+        "es": "🇪🇸",
+        "fr": "🇫🇷",
+        "pt": "🇧🇷",
+        "zh-CN": "🇨🇳",
+        "ja": "🇯🇵",
+        "ar": "🇸🇦",
+    }
+    current_language_code = st.session_state.get("saas_language_code", "en")
+    current_language_label = LANGUAGE_LABELS.get(current_language_code, "English")
+    current_flag_markup = flag_markup_by_code.get(current_language_code, f'<img src="{flag_icon_uri}" alt="" />')
+    language_toggle_id = f"footer-language-toggle-{re.sub(r'[^a-z0-9_-]+', '-', active_page.lower())}"
+    language_options = [
+        (
+            code,
+            LANGUAGE_LABELS.get(code, label),
+            flag_markup_by_code.get(code, "🌐"),
+            code == current_language_code,
+        )
+        for code, label, _ in LANGUAGE_OPTIONS
+    ]
+    language_menu_markup = "".join(
+        (
+            f'<a href="{_href(active_page, lang=code)}" class="footer-language-option'
+            + (" selected" if selected else "")
+            + '">'
+            + f'<span class="footer-language-option-flag">{flag_markup}</span>'
+            + f"<span>{label}</span>"
+            + "</a>"
+        )
+        for code, label, flag_markup, selected in language_options
+    )
     link_columns_markup = []
     for title, items in FOOTER_LINK_COLUMNS:
         item_markup = []
         for label, page, note in items:
             note_markup = f' <span class="footer-link-note">({note})</span>' if note else ""
             if page:
-                item_markup.append(f'<a href="{_href(page)}">{label}{note_markup}</a>')
+                link_class = "footer-link-item footer-legal-link" if title == "Legal" else "footer-link-item"
+                item_markup.append(f'<a class="{link_class}" href="{_href(page)}">{label}{note_markup}</a>')
             else:
                 item_markup.append(f'<span class="footer-static-link">{label}{note_markup}</span>')
         link_columns_markup.append(
@@ -3293,7 +7456,7 @@ def _render_footer() -> None:
                     </a>
                     <div class="footer-contact-row">
                       <span class="footer-contact-icon">⌖</span>
-                      <span>San Francisco, CA</span>
+                      <span>Beverly Hills, CA</span>
                     </div>
                   </div>
                   <div class="footer-social-row">{social_markup}</div>
@@ -3304,19 +7467,44 @@ def _render_footer() -> None:
                 <div class="footer-newsletter">
                   <h4>Stay up to date</h4>
                   <p>Get the latest on AI-powered project management.</p>
-                  <div class="footer-subscribe-row">
-                    <div class="footer-input-shell">Enter your email</div>
-                    <a href="{_href("contact")}" class="btn btn-primary btn-outline-cta footer-subscribe-btn">Subscribe</a>
-                  </div>
+                  <form class="footer-subscribe-row" method="get" action="">
+                    <input type="hidden" name="page" value="subscription-confirmation" />
+                    <input type="hidden" name="lang" value="{st.session_state.get("saas_language_code", "en")}" />
+                    <input
+                      class="footer-input-shell"
+                      type="email"
+                      name="newsletter_email"
+                      placeholder="Enter your email"
+                      autocomplete="email"
+                    />
+                    <button type="submit" class="btn btn-primary btn-outline-cta footer-subscribe-btn">Subscribe</button>
+                  </form>
                 </div>
                 <div class="footer-compliance-row">{compliance_markup}</div>
               </div>
               <div class="footer-bottom-row">
-                <span>&copy; 2026 certAIn. All rights reserved.</span>
-                <div class="footer-language-pill">
-                  <span class="footer-language-flag">US</span>
-                  <span>English</span>
-                  <span class="footer-language-caret">v</span>
+                <span>&copy; 2026 {_brand_name_html()}. All rights reserved.</span>
+                <div class="footer-language-shell">
+                  <span class="footer-language-globe" aria-hidden="true">
+                    <img src="{globe_icon_uri}" alt="" />
+                  </span>
+                  <div class="footer-language-dropdown">
+                    <input id="{language_toggle_id}" class="footer-language-toggle" type="checkbox" />
+                    <label class="footer-language-pill" for="{language_toggle_id}">
+                      <span class="footer-language-flag" aria-hidden="true">
+                        {current_flag_markup}
+                      </span>
+                      <span>{current_language_label}</span>
+                      <span class="footer-language-caret" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M4 6.5L8 10L12 6.5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </span>
+                    </label>
+                    <div class="footer-language-menu">
+                      {language_menu_markup}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3459,8 +7647,23 @@ def _init_state() -> None:
         "saas_email_alerts": True,
         "saas_in_app_alerts": True,
         "saas_ai_alerts": True,
+        "saas_language_code": "en",
         "saas_language": "English",
         "saas_region": "Global",
+        "contact_email": "",
+        "registration_email": "",
+        "newsletter_last_request_key": "",
+        "newsletter_delivery_status": "",
+        "newsletter_delivery_message": "",
+        "newsletter_confirmed": False,
+        "registration_last_request_key": "",
+        "registration_delivery_status": "",
+        "registration_delivery_message": "",
+        "task_architect_goal": "",
+        "task_architect_timeline": 12,
+        "task_architect_team_size": 5,
+        "task_architect_payload": None,
+        "decision_hub_last_analysis": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -3580,6 +7783,206 @@ def _build_tasks() -> list[dict[str, Any]]:
         mode=st.session_state.saas_mode,
     )
     return [task.model_dump() for task in plan.tasks]
+
+
+def _parse_timeline_input(timeline_text: str | int | float) -> tuple[int, float]:
+    if isinstance(timeline_text, (int, float)):
+        weeks = max(1, round(float(timeline_text)))
+        return int(weeks), float(max(15, weeks * 5))
+
+    clean = timeline_text.strip().lower()
+    if not clean:
+        raise TaskGenerationError("Timeline is required. Try something like `12 weeks`.")
+
+    match = re.search(r"(\d+(?:\.\d+)?)", clean)
+    if not match:
+        raise TaskGenerationError("Timeline must include a number, for example `12 weeks`.")
+
+    value = float(match.group(1))
+    if "quarter" in clean:
+        weeks = max(1, round(value * 13))
+    elif "month" in clean:
+        weeks = max(1, round(value * 4))
+    elif "day" in clean:
+        weeks = max(1, round(value / 5))
+    else:
+        weeks = max(1, round(value))
+
+    return int(weeks), float(max(15, weeks * 5))
+
+
+def _build_task_architect_tasks(project_goal: str, timeline_weeks: int, team_size: int) -> list[dict[str, Any]]:
+    base_plan = generate_task_plan("Create a delivery plan", max_tasks=8, mode="mock")
+    base_tasks = [task.model_dump() for task in base_plan.tasks]
+    goal_label = project_goal.strip().rstrip(".")
+    short_goal = goal_label if len(goal_label) <= 42 else f"{goal_label[:39].rstrip()}..."
+
+    custom_names = [
+        f"Scope and success criteria for {short_goal}",
+        "Roadmap, milestones, and workstream sequencing",
+        "Architecture and workflow design",
+        f"Core build for {short_goal}",
+        "Integrations and dependency hardening",
+        "Validation, QA, and pilot readiness",
+        "Documentation and team enablement",
+        "Launch readiness and stakeholder handoff",
+    ]
+
+    target_days = max(20.0, timeline_weeks * 5.0)
+    base_total = sum(float(task["mean_duration"]) for task in base_tasks)
+    schedule_scale = max(0.6, min(1.45, target_days / base_total))
+    team_factor = max(0.8, min(1.16, 1.08 - ((min(team_size, 12) - 5) * 0.035)))
+    pressure_delta = max(0.0, (1.0 - schedule_scale) * 0.16)
+    capacity_delta = max(0.0, (5 - min(team_size, 5)) * 0.025)
+
+    tasks: list[dict[str, Any]] = []
+    for index, task in enumerate(base_tasks):
+        mean_duration = max(2, round(float(task["mean_duration"]) * schedule_scale * team_factor))
+        std_dev = round(max(1.0, mean_duration * (0.17 + float(task["risk_factor"]) * 0.18)), 1)
+        risk_factor = min(
+            0.82,
+            max(0.18, round(float(task["risk_factor"]) + pressure_delta + capacity_delta, 2)),
+        )
+        tasks.append(
+            {
+                **task,
+                "name": custom_names[index] if index < len(custom_names) else task["name"],
+                "mean_duration": mean_duration,
+                "std_dev": std_dev,
+                "risk_factor": risk_factor,
+            }
+        )
+    return tasks
+
+
+def _generate_task_architect_payload(project_goal: str, timeline_text: str | int | float, team_size: int) -> dict[str, Any]:
+    goal = project_goal.strip()
+    if not goal:
+        raise TaskGenerationError("Project goal is required to generate an AI plan.")
+
+    timeline_weeks, deadline_days = _parse_timeline_input(timeline_text)
+    timeline_label = (
+        f"{int(round(float(timeline_text)))} weeks"
+        if isinstance(timeline_text, (int, float))
+        else timeline_text.strip()
+    )
+    normalized_team_size = max(1, int(team_size))
+    tasks = _build_task_architect_tasks(goal, timeline_weeks, normalized_team_size)
+    iterations = 2000
+    seed = int(st.session_state.get("saas_seed", 17))
+    graph = build_project_graph(tasks)
+    critical_path, critical_days = critical_path_by_mean(graph)
+    completion = run_monte_carlo(graph, iterations=iterations, seed=seed)
+    metrics = compute_metrics(completion, deadline_days)
+    drivers = rank_delay_drivers(graph, iterations=min(500, iterations), seed=seed)
+    scenarios_df = scenario_comparison(
+        build_project_graph,
+        tasks,
+        deadline_days=deadline_days,
+        iterations=iterations,
+        seed=seed,
+    )
+    ml_features_df, ml_predictions_df, ml_summary_df, model_status = _run_ml_scoring(tasks)
+    portfolio_df = _load_portfolio_history()
+    monitoring_df = _load_monitoring_snapshot()
+    model_metrics = _load_model_metrics()
+    portfolio_summary = _portfolio_summary(portfolio_df)
+    monitoring_summary = _monitoring_summary(monitoring_df)
+
+    payload = {
+        "project_text": goal,
+        "sample": "AI Task Architect",
+        "mode": "mock",
+        "deadline_days": deadline_days,
+        "iterations": iterations,
+        "max_tasks": len(tasks),
+        "seed": seed,
+        "tasks": tasks,
+        "graph": graph,
+        "critical_path": critical_path,
+        "critical_path_days": critical_days,
+        "completion": completion,
+        "metrics": metrics,
+        "drivers": drivers,
+        "scenarios_df": scenarios_df,
+        "ml_features_df": ml_features_df,
+        "ml_predictions_df": ml_predictions_df,
+        "ml_summary_df": ml_summary_df,
+        "model_status": asdict(model_status),
+        "portfolio_df": portfolio_df,
+        "monitoring_df": monitoring_df,
+        "model_metrics": model_metrics,
+        "portfolio_summary": portfolio_summary,
+        "monitoring_summary": monitoring_summary,
+        "architect_meta": {
+            "project_goal": goal,
+            "timeline_text": timeline_label,
+            "timeline_weeks": timeline_weeks,
+            "team_size": normalized_team_size,
+        },
+    }
+    return payload
+
+
+def _run_task_architect_generation(project_goal: str, timeline_text: str | int | float, team_size: int) -> str | None:
+    try:
+        generated_payload = _generate_task_architect_payload(project_goal, timeline_text, int(team_size))
+        st.session_state.task_architect_payload = generated_payload
+        st.session_state.saas_payload = generated_payload
+        st.session_state.saas_bootstrapped = True
+        st.session_state.saas_project_text = generated_payload["project_text"]
+        st.session_state.saas_deadline = generated_payload["deadline_days"]
+        st.session_state.saas_iterations = generated_payload["iterations"]
+        st.session_state.saas_max_tasks = generated_payload["max_tasks"]
+        _persist_run(generated_payload)
+
+        top_driver = generated_payload["drivers"][0]["task_name"] if generated_payload["drivers"] else "No dominant driver"
+        history_item = {
+            "timestamp": datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC"),
+            "sample": generated_payload["sample"],
+            "title": generated_payload["project_text"][:60] + ("..." if len(generated_payload["project_text"]) > 60 else ""),
+            "delay_probability": generated_payload["metrics"]["delay_probability"],
+            "p80": generated_payload["metrics"]["p80"],
+            "top_driver": top_driver,
+        }
+        st.session_state.saas_history = [history_item, *st.session_state.saas_history[:5]]
+        return None
+    except (TaskGenerationError, GraphValidationError, ValueError) as exc:
+        return str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return f"Unable to generate the AI plan: {exc}"
+
+
+def _run_task_architect_upload_generation(uploaded_file: Any) -> str | None:
+    if uploaded_file is None:
+        return "Upload a project file first."
+
+    try:
+        generated_payload = _generate_task_architect_payload_from_upload(uploaded_file.name, uploaded_file.getvalue())
+        st.session_state.task_architect_payload = generated_payload
+        st.session_state.saas_payload = generated_payload
+        st.session_state.saas_bootstrapped = True
+        st.session_state.saas_project_text = generated_payload["project_text"]
+        st.session_state.saas_deadline = generated_payload["deadline_days"]
+        st.session_state.saas_iterations = generated_payload["iterations"]
+        st.session_state.saas_max_tasks = generated_payload["max_tasks"]
+        _persist_run(generated_payload)
+
+        top_driver = generated_payload["drivers"][0]["task_name"] if generated_payload["drivers"] else "No dominant driver"
+        history_item = {
+            "timestamp": datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC"),
+            "sample": generated_payload["sample"],
+            "title": generated_payload["project_text"][:60] + ("..." if len(generated_payload["project_text"]) > 60 else ""),
+            "delay_probability": generated_payload["metrics"]["delay_probability"],
+            "p80": generated_payload["metrics"]["p80"],
+            "top_driver": top_driver,
+        }
+        st.session_state.saas_history = [history_item, *st.session_state.saas_history[:5]]
+        return None
+    except (TaskGenerationError, GraphValidationError, ValueError) as exc:
+        return str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return f"Unable to generate the AI plan from the uploaded file: {exc}"
 
 
 def _run_ml_scoring(
@@ -3791,7 +8194,7 @@ def _render_home() -> None:
                           <span class="home-chart-bar" style="height:14px;"></span>
                         </div>
                         <div class="home-chart-axis"></div>
-                        <div class="home-chart-caption">P50: March 15 · P80: March 22</div>
+                        <div class="home-chart-caption">P50: May 15 · P80: May 22</div>
                       </div>
                     </div>
                     <div class="home-preview-card">
@@ -3870,7 +8273,7 @@ def _render_home() -> None:
                     </div>
                     <h2 class="home-intelligence-title">Intelligence at Every Level</h2>
                     <p class="home-intelligence-copy">
-                      From task planning to executive reporting — certAIn covers the entire project lifecycle.
+                      From task planning to executive reporting — {_brand_name_html()} covers the entire project lifecycle.
                     </p>
                   </div>
                   <div class="home-intelligence-grid">
@@ -3919,11 +8322,11 @@ def _render_home() -> None:
         "These signals are designed to make the product story immediately legible before you move into the live dashboard.",
     )
     st.markdown(
-        """
+        f"""
         <div class="home-testimonial-shell">
           <div class="home-testimonial-grid">
             <div class="home-testimonial-card">
-              <p class="home-testimonial-quote">"certAIn reduced our project overruns by 40%. The Monte Carlo simulations gave us confidence we never had before."</p>
+              <p class="home-testimonial-quote">"{_brand_name_html()} reduced our project overruns by 40%. The Monte Carlo simulations gave us confidence we never had before."</p>
               <div class="home-testimonial-author">
                 <strong>Sarah Chen</strong>
                 <span>VP Engineering, TechCorp</span>
@@ -3958,7 +8361,7 @@ def _render_home() -> None:
               </div>
               <h2 class="home-cta-title">Ready to predict your project's future?</h2>
               <p class="home-cta-copy">Start forecasting with AI in minutes. No credit card required.</p>
-              <a href="{_href("dashboard")}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
+              <a href="{_trial_href()}" class="btn btn-primary btn-outline-cta">Start Free Trial</a>
             </div>
             """
         ),
@@ -3976,12 +8379,11 @@ def _render_product() -> None:
                   <span class="kicker">Product</span>
                   <h1 class="page-title">Plan, forecast, and explain risk from one workflow.</h1>
                   <p class="page-copy">
-                    certAIn connects project intake, dependency modeling, simulation, advisory ML, and scenario comparison
+                    {_brand_name_html()} connects project intake, dependency modeling, simulation, advisory ML, and scenario comparison
                     in one SaaS-style interface.
                   </p>
                   <div class="cta-row">
-                    <a href="{_href("dashboard")}" class="btn btn-primary">Open Dashboard</a>
-                    <a href="{_href("pricing")}" class="btn btn-secondary">View Pricing</a>
+                    <a href="{_href("pricing")}" class="product-card-cta-link">View Pricing</a>
                   </div>
                 </div>
                 <div class="glass page-hero-card">
@@ -4012,33 +8414,30 @@ def _render_product() -> None:
               <div class="detail-card">
                 <h3>Brief to plan</h3>
                 <p>Generate structured project tasks with durations, dependencies, and risk factors.</p>
-                <a href="{_href("forecasting")}" class="text-link">Go deeper</a>
               </div>
               <div class="detail-card">
                 <h3>Workflow graph</h3>
                 <p>Highlight the critical path and expose where sequence risk becomes schedule risk.</p>
-                <a href="{_href("monte-carlo")}" class="text-link">Go deeper</a>
               </div>
               <div class="detail-card">
                 <h3>Scenario lab</h3>
                 <p>Compare baseline, mitigation, and acceleration paths before promising a deadline.</p>
-                <a href="{_href("dashboard")}" class="text-link">Open module</a>
               </div>
               <div class="detail-card">
                 <h3>Advisory signals</h3>
                 <p>Overlay task-level risk scoring without replacing the probabilistic schedule view.</p>
-                <a href="{_href("forecasting")}" class="text-link">Go deeper</a>
               </div>
               <div class="detail-card">
                 <h3>Executive outputs</h3>
                 <p>Present metrics, delay drivers, and safer commitments in business language.</p>
-                <a href="{_href("dashboard")}" class="text-link">See in dashboard</a>
               </div>
               <div class="detail-card">
                 <h3>Presentation handoff</h3>
                 <p>Reuse the same product language in the prototype, Streamlit app, and final presentation.</p>
-                <a href="{_href("about")}" class="text-link">Capstone framing</a>
               </div>
+            </div>
+            <div class="product-card-cta">
+              <a href="{_href("guide")}" class="product-card-cta-link">Try the Dashboard <span aria-hidden="true">→</span></a>
             </div>
             """
         ),
@@ -4048,104 +8447,98 @@ def _render_product() -> None:
 
 def _render_forecasting() -> None:
     _ensure_demo_payload()
-    payload = st.session_state.saas_payload
-    portfolio_df = payload["portfolio_df"]
-    monitoring_df = payload["monitoring_df"]
-    model_metrics = payload["model_metrics"]
-
-    timeline_df = (
-        portfolio_df[["Project_ID", "Planned_Duration_Days", "Actual_Duration_Days"]]
-        .sort_values("Planned_Duration_Days")
-        .head(40)
-    )
-    area_figure = go.Figure()
-    area_figure.add_trace(
-        go.Scatter(
-            x=timeline_df["Project_ID"],
-            y=timeline_df["Planned_Duration_Days"],
-            mode="lines+markers",
-            name="Planned timeline",
-            line=dict(color="#64a2ff", width=3),
-        )
-    )
-    area_figure.add_trace(
-        go.Scatter(
-            x=timeline_df["Project_ID"],
-            y=timeline_df["Actual_Duration_Days"],
-            mode="lines+markers",
-            name="Actual timeline",
-            line=dict(color="#18d1c7", width=3),
-            fill="tonexty",
-            fillcolor="rgba(24, 209, 199, 0.14)",
-        )
-    )
-    area_figure.update_layout(
-        title="Predicted vs actual project timelines",
-        xaxis_title="Portfolio sample",
-        yaxis_title="Duration (days)",
-    )
-
-    confidence_df = monitoring_df.copy()
-    confidence_df["Snapshot_Month"] = pd.to_datetime(confidence_df["Snapshot_Month"])
-    confidence_df = (
-        confidence_df.groupby("Snapshot_Month", as_index=False)
-        .agg(
-            avg_confidence=("Prediction_Confidence", "mean"),
-            avg_p80=("P80_Forecast_Days", "mean"),
-            avg_actual=("Actual_Completion_Days", "mean"),
-        )
-        .sort_values("Snapshot_Month")
-    )
-    confidence_figure = go.Figure()
-    confidence_figure.add_trace(
-        go.Scatter(
-            x=confidence_df["Snapshot_Month"],
-            y=confidence_df["avg_p80"],
-            mode="lines+markers",
-            name="P80 forecast",
-            line=dict(color="#f5c56b", width=3),
-        )
-    )
-    confidence_figure.add_trace(
-        go.Scatter(
-            x=confidence_df["Snapshot_Month"],
-            y=confidence_df["avg_actual"],
-            mode="lines+markers",
-            name="Actual completion",
-            line=dict(color="#76e7ff", width=3),
-        )
-    )
-    confidence_figure.update_layout(
-        title="Confidence interval tracking",
-        xaxis_title="Monitoring month",
-        yaxis_title="Average completion days",
-    )
-
-    selected_model = model_metrics.get("selected_model_name", "unknown")
-    cv_macro = model_metrics.get("cv_macro_f1_mean", 0.0) * 100.0
-    advisory_high = 0
-    if not payload["ml_predictions_df"].empty and "Predicted_Risk_Level" in payload["ml_predictions_df"]:
-        advisory_high = int((payload["ml_predictions_df"]["Predicted_Risk_Level"] == "High").sum())
-
     st.markdown(
         dedent(
             f"""
-            <div class="page-shell">
-              <div class="page-grid">
-                <div class="glass page-hero-card">
-                  <span class="kicker">AI Forecasting</span>
-                  <h1 class="page-title">Connect forecasts to the real model, not just polished copy.</h1>
-                  <p class="page-copy">
-                    This page now uses the loaded risk classifier, the monitoring snapshot, and the portfolio history
-                    to tell a more credible forecasting story.
+            <div class="page-shell ai-forecast-shell">
+              <div class="glass page-hero-card ai-forecast-kicker-card">
+                <span class="kicker">AI Forecasting</span>
+              </div>
+              <div class="ai-forecast-stage">
+                <div class="ai-forecast-copy">
+                  <h1 class="ai-forecast-title">Predictive Intelligence for Projects</h1>
+                  <p class="ai-forecast-subtitle">
+                    Our AI engine analyzes project structures, dependencies, and historical data to predict risks
+                    with unprecedented accuracy.
                   </p>
                 </div>
-                <div class="glass page-hero-card">
-                  <span class="eyebrow">Connected model facts</span>
-                  <div class="data-pair"><span>Selected model</span><strong>{selected_model}</strong></div>
-                  <div class="data-pair"><span>Cross-val macro F1</span><strong>{cv_macro:.1f}%</strong></div>
-                  <div class="data-pair"><span>Live high-risk tasks</span><strong>{advisory_high}</strong></div>
-                  <div class="data-pair"><span>Monitoring coverage</span><strong>{len(monitoring_df)} snapshots</strong></div>
+                <div class="ai-forecast-grid">
+                  <article class="detail-card ai-forecast-card">
+                    <span class="ai-forecast-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M10 5a3 3 0 1 0-6 0c0 1.6 1.1 2.8 2.4 3.4"></path>
+                        <path d="M14 5a3 3 0 1 1 6 0c0 1.6-1.1 2.8-2.4 3.4"></path>
+                        <path d="M7 13a3 3 0 1 0 0 6"></path>
+                        <path d="M17 13a3 3 0 1 1 0 6"></path>
+                        <path d="M7 8h10"></path>
+                        <path d="M12 8v8"></path>
+                        <path d="M9.5 16H7"></path>
+                        <path d="M17 16h-2.5"></path>
+                      </svg>
+                    </span>
+                    <h3>Delay Prediction</h3>
+                    <p>Machine learning models analyze historical patterns and current dependencies to forecast delays before they happen.</p>
+                  </article>
+                  <article class="detail-card ai-forecast-card">
+                    <span class="ai-forecast-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M5 16l5-5 4 4 5-7"></path>
+                        <path d="M15 8h4v4"></path>
+                      </svg>
+                    </span>
+                    <h3>Velocity Forecasting</h3>
+                    <p>Track team velocity trends and predict future sprint capacity with confidence intervals.</p>
+                  </article>
+                  <article class="detail-card ai-forecast-card">
+                    <span class="ai-forecast-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M12 4l8 14H4L12 4z"></path>
+                        <path d="M12 10v3.5"></path>
+                        <path d="M12 17h.01"></path>
+                      </svg>
+                    </span>
+                    <h3>Risk Scoring</h3>
+                    <p>Every task receives an AI-generated risk score based on complexity, dependencies, and resource allocation.</p>
+                  </article>
+                  <article class="detail-card ai-forecast-card">
+                    <span class="ai-forecast-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M5 19V9"></path>
+                        <path d="M10 19V5"></path>
+                        <path d="M15 19v-7"></path>
+                        <path d="M20 19V8"></path>
+                        <path d="M3 19h18"></path>
+                      </svg>
+                    </span>
+                    <h3>Explainable Insights</h3>
+                    <p>Understand why the AI predicts a delay with transparent reasoning and actionable recommendations.</p>
+                  </article>
+                </div>
+                <div class="glass ai-forecast-process-card">
+                  <h3>How AI Forecasting Works</h3>
+                  <div class="ai-forecast-steps">
+                    <div class="ai-forecast-step">
+                      <span class="ai-forecast-step-dot">1</span>
+                      <strong>Upload Project Plan</strong>
+                    </div>
+                    <div class="ai-forecast-step">
+                      <span class="ai-forecast-step-dot">2</span>
+                      <strong>AI Analyzes Dependencies</strong>
+                    </div>
+                    <div class="ai-forecast-step">
+                      <span class="ai-forecast-step-dot">3</span>
+                      <strong>Risk Scores Generated</strong>
+                    </div>
+                    <div class="ai-forecast-step">
+                      <span class="ai-forecast-step-dot">4</span>
+                      <strong>Actionable Insights</strong>
+                    </div>
+                  </div>
+                </div>
+                <div class="ai-forecast-cta-wrap">
+                  <a href="?page=risk-intelligence&amp;lang=en" class="btn btn-primary ai-forecast-cta">
+                    See Risk Intelligence <span aria-hidden="true">→</span>
+                  </a>
                 </div>
               </div>
             </div>
@@ -4154,89 +8547,9 @@ def _render_forecasting() -> None:
         unsafe_allow_html=True,
     )
 
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Model Version", model_metrics.get("model_version", "unknown"))
-    metric_cols[1].metric("Selected Model", selected_model.replace("_", " ").title())
-    metric_cols[2].metric("CV Macro F1", f"{cv_macro:.1f}%")
-    metric_cols[3].metric("Avg Monitoring Confidence", f"{payload['monitoring_summary']['avg_confidence']:.1f}%")
-
-    chart_cols = st.columns(2, gap="large")
-    with chart_cols[0]:
-        st.plotly_chart(_theme_chart(area_figure), use_container_width=True)
-    with chart_cols[1]:
-        st.plotly_chart(_theme_chart(confidence_figure), use_container_width=True)
-
-    _section_intro(
-        "Forecast insights",
-        "The page combines live advisory scoring and portfolio evidence",
-        "That means your AI forecasting story is now tied to the actual classifier, portfolio duration history, and monitoring confidence data.",
-    )
-
-    st.markdown(
-        dedent(
-            f"""
-            <div class="detail-grid">
-              <div class="detail-card">
-                <h3>Live advisory scoring</h3>
-                <p>{len(payload['ml_predictions_df'])} task rows were scored using the loaded <code>risk_classifier.joblib</code> artifact.</p>
-              </div>
-              <div class="detail-card">
-                <h3>Forecast drift tracking</h3>
-                <p>Average monitoring drift is {_safe_metric(payload['monitoring_summary']['avg_drift'], 3)}, based on <code>risk_monitoring_snapshot.csv</code>.</p>
-              </div>
-              <div class="detail-card">
-                <h3>Portfolio grounding</h3>
-                <p>Timeline visuals are drawn from <code>project_portfolio_history.csv</code> so the story reflects historical planning outcomes.</p>
-              </div>
-            </div>
-            """
-        ),
-        unsafe_allow_html=True,
-    )
-
-
 def _render_monte_carlo() -> None:
-    st.markdown(
-        """
-        <div class="page-shell">
-          <div class="page-grid">
-            <div class="glass page-hero-card">
-              <span class="kicker">Monte Carlo</span>
-              <h1 class="page-title">Replace one optimistic date with a defensible range.</h1>
-              <p class="page-copy">
-                Run repeated simulations to estimate completion distributions, surface safer commitments,
-                and identify how deadline risk changes under different scenarios.
-              </p>
-            </div>
-            <div class="glass page-hero-card">
-              <span class="eyebrow">Forecast anchors</span>
-              <div class="data-pair"><span>P50 commitment</span><strong>Balanced target</strong></div>
-              <div class="data-pair"><span>P80 commitment</span><strong>Safer promise</strong></div>
-              <div class="data-pair"><span>Delay probability</span><strong>Leadership signal</strong></div>
-              <div class="data-pair"><span>Main driver</span><strong>Mitigation focus</strong></div>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    _section_intro(
-        "Simulation lens",
-        "Monte Carlo is the credibility engine behind the dashboard",
-        "It transforms schedule uncertainty into metrics the audience can understand: mean completion, P50, P80, and exposure to the chosen deadline.",
-    )
-
-    st.markdown(
-        """
-        <div class="feature-grid">
-          <div class="feature-card"><h3>P50</h3><p>The most likely commitment point when normal delivery conditions hold.</p></div>
-          <div class="feature-card"><h3>P80</h3><p>A safer promise for executive communication when teams want higher certainty.</p></div>
-          <div class="feature-card"><h3>Delay drivers</h3><p>Critical-path frequency reveals which tasks deserve mitigation before launch.</p></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    _render_monte_carlo_explainer()
+    _render_monte_carlo_lens()
 
 
 def _render_pricing() -> None:
@@ -4244,35 +8557,77 @@ def _render_pricing() -> None:
         dedent(
             f"""
             <div class="page-shell">
-              <div class="glass page-hero-card">
+              <div class="glass page-hero-card pricing-hero-card">
                 <span class="kicker">Pricing</span>
-                <h1 class="page-title">Packaging ideas that make the product story feel complete.</h1>
+                <h1 class="page-title">Simple pricing that scales from first forecast to enterprise rollout.</h1>
                 <p class="page-copy">
-                  These plans are illustrative. They help the capstone feel like a SaaS platform with a believable go-to-market story.
+                  Choose a plan that fits your team, from early project planning to full enterprise governance.
                 </p>
               </div>
             </div>
-            <div class="pricing-grid">
-              <div class="pricing-card">
-                <span class="pricing-tag">Starter</span>
-                <h3>Capstone Demo</h3>
-                <p>For judges, coaches, and first walkthroughs.</p>
-                <p>Static product story, live dashboard preview, and presentation flow.</p>
-                <a href="{_href("dashboard")}" class="btn btn-secondary">Open Demo</a>
-              </div>
-              <div class="pricing-card">
-                <span class="pricing-tag">Most Popular</span>
-                <h3>Team Pilot</h3>
-                <p>For delivery teams validating risk-aware commitments before launch.</p>
-                <p>AI planning, Monte Carlo simulation, scenario comparison, and executive reporting.</p>
-                <a href="{_href("login")}" class="btn btn-primary btn-outline-cta">Start Trial</a>
-              </div>
-              <div class="pricing-card">
-                <span class="pricing-tag">Enterprise</span>
-                <h3>Portfolio</h3>
-                <p>For PMOs and sponsors coordinating multiple high-risk initiatives.</p>
-                <p>Program views, governance reporting, and rollout support for decision forums.</p>
-                <a href="{_href("about")}" class="btn btn-secondary">Talk to Team</a>
+            <div class="page-shell pricing-showcase-shell">
+              <div class="pricing-grid pricing-showcase">
+                <article class="pricing-card pricing-plan-card">
+                  <div class="pricing-plan-head">
+                    <h3 class="pricing-plan-name">Starter</h3>
+                    <div class="pricing-price-row">
+                      <span class="pricing-price-value">$29</span>
+                      <span class="pricing-price-suffix">/month</span>
+                    </div>
+                    <p class="pricing-plan-copy">For small teams getting started with AI project planning.</p>
+                  </div>
+                  <ul class="pricing-feature-list">
+                    <li>Up to 5 projects</li>
+                    <li>1,000 Monte Carlo simulations/mo</li>
+                    <li>Basic risk detection</li>
+                    <li>CSV &amp; Excel upload</li>
+                    <li>Email support</li>
+                    <li>1 team member</li>
+                  </ul>
+                  <a href="{_trial_href()}" class="pricing-plan-cta pricing-plan-cta-muted">Start Free Trial</a>
+                </article>
+                <article class="pricing-card pricing-plan-card pricing-plan-card-featured">
+                  <span class="pricing-plan-badge">Most Popular</span>
+                  <div class="pricing-plan-head">
+                    <h3 class="pricing-plan-name">Professional</h3>
+                    <div class="pricing-price-row">
+                      <span class="pricing-price-value">$99</span>
+                      <span class="pricing-price-suffix">/month</span>
+                    </div>
+                    <p class="pricing-plan-copy">For growing teams that need advanced forecasting.</p>
+                  </div>
+                  <ul class="pricing-feature-list">
+                    <li>Unlimited projects</li>
+                    <li>50,000 simulations/mo</li>
+                    <li>Advanced AI risk analysis</li>
+                    <li>All file formats (incl. .mpp)</li>
+                    <li>Executive reporting</li>
+                    <li>Up to 25 team members</li>
+                    <li>API access</li>
+                    <li>Priority support</li>
+                  </ul>
+                  <a href="{_trial_href()}" class="pricing-plan-cta pricing-plan-cta-primary">Start Free Trial</a>
+                </article>
+                <article class="pricing-card pricing-plan-card">
+                  <div class="pricing-plan-head">
+                    <h3 class="pricing-plan-name">Enterprise</h3>
+                    <div class="pricing-price-row pricing-price-row-custom">
+                      <span class="pricing-price-value pricing-price-value-custom">Custom</span>
+                    </div>
+                    <p class="pricing-plan-copy">For organizations that need maximum control and scale.</p>
+                  </div>
+                  <ul class="pricing-feature-list">
+                    <li>Everything in Professional</li>
+                    <li>Unlimited simulations</li>
+                    <li>SSO &amp; SAML</li>
+                    <li>Custom integrations</li>
+                    <li>Dedicated account manager</li>
+                    <li>SLA guarantee</li>
+                    <li>On-premise deployment option</li>
+                    <li>Custom AI model training</li>
+                  </ul>
+                  <a href="{_href("about")}" class="pricing-plan-cta pricing-plan-cta-muted">Contact Sales</a>
+                </article>
               </div>
             </div>
             """
@@ -4282,24 +8637,146 @@ def _render_pricing() -> None:
 
 
 def _render_about() -> None:
+    values = [
+        ("Innovation First", "We push the boundaries of what AI can do for project management.", "Innovation"),
+        ("Trust & Security", "Enterprise-grade security and compliance are non-negotiable.", "Security"),
+        ("Customer Obsession", "Every feature is driven by real feedback from project teams.", "Customer"),
+        ("Global Perspective", "Built for teams of every size, across every continent.", "Global"),
+    ]
+    journey = [
+        (
+            "2026",
+            "Idea & Foundation",
+            "certAIn began from a clearly defined idea to bring probabilistic, AI-driven decision support into project planning. The initial phase focused on exploring how uncertainty, dependencies, and risk could be modeled more realistically.",
+            "left",
+        ),
+        (
+            "2026",
+            "Method & Architecture",
+            "The system approach was shaped through exploration of key methodologies, including machine learning, DAG-based dependency modeling, and Monte Carlo simulation, leading to a unified architecture connecting planning, forecasting, and monitoring.",
+            "right",
+        ),
+        (
+            "2026",
+            "Data Strategy & Modeling",
+            "Synthetic datasets were designed and generated to simulate realistic project conditions, followed by development and evaluation of machine learning models for risk prediction.",
+            "left",
+        ),
+        (
+            "2026",
+            "Forecasting Engine",
+            "A DAG-based Monte Carlo forecasting engine was implemented to simulate task-level uncertainty, identify the critical path, and generate P50/P80 delivery estimates.",
+            "right",
+        ),
+        (
+            "2026",
+            "End-to-End System",
+            "The full workflow was structured across notebooks, covering data analysis, modeling, forecasting, and monitoring, resulting in a reproducible and scalable pipeline.",
+            "left",
+        ),
+        (
+            "2026",
+            "Product & Experience",
+            "The system was translated into an interactive prototype, and consolidated into a clear product narrative aligned with user value and decision-making support.",
+            "right",
+        ),
+    ]
+    team_members = [
+        (
+            "Meysameh Shojaei",
+            "Founder & CEO",
+            "AI Product Leader building data-driven decision systems for next-generation project planning. Leads product strategy and execution from concept to deployment. Originator of the certAIn vision, creating a scalable AI platform that redefines how teams plan, forecast risk, and make critical decisions.",
+            _image_data_uri(str(LEADERSHIP_IMAGES / "CEO.jpeg")),
+        ),
+        (
+            "Santiago Molina",
+            "COO",
+            "Industrial Engineer and AI Project Leader driving end-to-end digital initiatives in international environments. Specializes in product development, workflow optimization, and operational efficiency using Agile methodologies. Experienced in large-scale transformation, including process redesign and cloud migration.",
+            _image_data_uri(str(LEADERSHIP_IMAGES / "COO.jpg")),
+        ),
+        (
+            "James Park",
+            "CTO",
+            "Ex-Microsoft engineer building scalable ML infrastructure and high-performance systems. Expert in data pipelines, model deployment, and simulation systems for complex forecasting and decision-making applications.",
+            _image_data_uri(str(LEADERSHIP_IMAGES / "CTO.png")),
+        ),
+        (
+            "Maria Smith",
+            "CFO",
+            "Former Deloitte Partner with 18+ years in corporate finance and scaling technology ventures. Specializes in financial strategy, fundraising, and operational efficiency across AI and SaaS organizations.",
+            _image_data_uri(str(LEADERSHIP_IMAGES / "CFO.png")),
+        ),
+        (
+            "Lisa Schmidt",
+            "Head of AI",
+            "PhD in Operations Research leading advanced AI and predictive analytics initiatives. Expert in forecasting models, optimization, and building scalable data-driven systems for complex planning challenges.",
+            _image_data_uri(str(LEADERSHIP_IMAGES / "Head AI.png")),
+        ),
+        (
+            "David Chen",
+            "Head of Product",
+            "Product leader with experience building project management tools at Atlassian and Asana. Focused on scalable, user-centric products that improve workflow efficiency and team collaboration.",
+            _image_data_uri(str(LEADERSHIP_IMAGES / "Head Product.png")),
+        ),
+    ]
+    brand_name = "certAIn"
+    logo_uri = _logo_data_uri()
+    logo_markup = (
+        f'<img src="{logo_uri}" alt="certAIn logo" />'
+        if logo_uri
+        else '<div class="brand-mark" aria-hidden="true">AI</div>'
+    )
     st.markdown(
-        """
-        <div class="page-shell">
-          <div class="page-grid">
-            <div class="glass page-hero-card">
-              <span class="kicker">About Us</span>
-              <h1 class="page-title">certAIn started as a capstone and evolved into a product story.</h1>
-              <p class="page-copy">
-                The core question was simple: can teams move from a plain-language brief to a defensible,
-                risk-aware commitment in a single planning session?
+        f"""
+        <div class="about-proto-shell">
+          <div class="about-top-stage">
+            <div class="about-proto-hero">
+              <div class="about-proto-logo-shell">
+                {logo_markup}
+              </div>
+              <h1 class="about-proto-title">About {_brand_name_html()}</h1>
+              <p class="about-proto-subtitle">
+                We're building the future of project intelligence — where AI helps teams deliver on time, every time.
               </p>
             </div>
-            <div class="glass page-hero-card">
-              <span class="eyebrow">What it demonstrates</span>
-              <div class="data-pair"><span>Business framing</span><strong>Clear questions</strong></div>
-              <div class="data-pair"><span>Technical rigor</span><strong>EDA + modeling</strong></div>
-              <div class="data-pair"><span>Decision support</span><strong>Scenarios + exports</strong></div>
-              <div class="data-pair"><span>Presentation quality</span><strong>Demo-ready</strong></div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.write("")
+    st.markdown(
+        """
+        <div class="about-top-stage">
+          <div class="about-mv-grid">
+            <div class="about-mv-card">
+              <div class="about-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="8"></circle>
+                  <circle cx="12" cy="12" r="4"></circle>
+                  <circle cx="12" cy="12" r="1.3"></circle>
+                </svg>
+              </div>
+              <h3>Our Mission</h3>
+              <p>
+                To eliminate project failure by giving every team access to AI-powered forecasting and risk intelligence.
+                We believe that project delays are predictable — and preventable — when teams have the right data at the
+                right time.
+              </p>
+            </div>
+            <div class="about-mv-card">
+              <div class="about-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path>
+                  <circle cx="12" cy="12" r="2.8"></circle>
+                </svg>
+              </div>
+              <h3>Our Vision</h3>
+              <p>
+                A world where every project plan comes with a probability of success. Where project managers can
+                confidently tell stakeholders not just when a project will finish — but how certain they are about it.
+              </p>
             </div>
           </div>
         </div>
@@ -4307,51 +8784,186 @@ def _render_about() -> None:
         unsafe_allow_html=True,
     )
 
-    _section_intro(
-        "Why this format works",
-        "The app tells the story your coach wants to see",
-        "It bridges business questions, technical modeling, monitoring, deployment, and a live dashboard in one coherent product narrative.",
-    )
-
+    st.write("")
     st.markdown(
         """
-        <div class="detail-grid">
-          <div class="detail-card">
-            <h3>Business question</h3>
-            <p>How likely is the plan to miss the target date, and what safer commitment should be made?</p>
+        <div class="about-values-section">
+          <div class="about-values-pill">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v4"></path>
+              <path d="M12 17v4"></path>
+              <path d="M4.93 4.93l2.83 2.83"></path>
+              <path d="M16.24 16.24l2.83 2.83"></path>
+              <path d="M3 12h4"></path>
+              <path d="M17 12h4"></path>
+              <path d="M4.93 19.07l2.83-2.83"></path>
+              <path d="M16.24 7.76l2.83-2.83"></path>
+            </svg>
+            <span>What Drives Us</span>
           </div>
-          <div class="detail-card">
-            <h3>Technical core</h3>
-            <p>DAG modeling, Monte Carlo simulation, critical-path analysis, and advisory ML risk scoring.</p>
-          </div>
-          <div class="detail-card">
-            <h3>Presentation outcome</h3>
-            <p>A polished capstone product that feels like a SaaS platform rather than a notebook handoff.</p>
+          <h2 class="about-section-heading">Our Core Values</h2>
+          <div class="about-values-grid">
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M13 2L4 14h7l-1 8 10-13h-7l0-7z"></path>
+                </svg>
+              </div>
+              <h3>Innovation First</h3>
+              <p>We push the boundaries of what AI can do for project management.</p>
+            </div>
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 3l7 4v5c0 5-3.5 8.5-7 9-3.5-.5-7-4-7-9V7l7-4z"></path>
+                </svg>
+              </div>
+              <h3>Trust &amp; Security</h3>
+              <p>Enterprise-grade security and compliance are non-negotiable.</p>
+            </div>
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.53A4 4 0 0 1 19 11c0 5.65-7 10-7 10z"></path>
+                </svg>
+              </div>
+              <h3>Customer Obsession</h3>
+              <p>Every feature is driven by real feedback from project teams.</p>
+            </div>
+            <div class="about-value-card">
+              <div class="about-value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="9"></circle>
+                  <path d="M3 12h18"></path>
+                  <path d="M12 3a15 15 0 0 1 0 18"></path>
+                  <path d="M12 3a15 15 0 0 0 0 18"></path>
+                </svg>
+              </div>
+              <h3>Global Perspective</h3>
+              <p>Built for teams of every size, across every continent.</p>
+            </div>
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    st.write("")
+    timeline_rows = []
+    for year, title, copy, side in journey:
+        card_markup = (
+            f'<article class="about-timeline-card">'
+            f'<span class="about-timeline-year ai-gradient">{html.escape(year)}</span>'
+            f'<h3 class="about-journey-step-title"><span class="ai-gradient">{html.escape(title)}</span></h3>'
+            f'<p>{html.escape(copy)}</p>'
+            f'</article>'
+        )
+        left_markup = card_markup if side == "left" else ""
+        right_markup = card_markup if side == "right" else ""
+        timeline_rows.append(
+            f'<div class="about-timeline-row {html.escape(side)}">'
+            f'<div class="about-timeline-side">{left_markup}</div>'
+            f'<div class="about-timeline-axis"><span class="about-timeline-dot"></span></div>'
+            f'<div class="about-timeline-side">{right_markup}</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f"""
+        <div class="about-journey-section" style="margin-bottom: 2.2rem;">
+          <h2 class="about-section-heading">Transforming an initial idea into a risk-aware <span class="ai-gradient about-inline-ai">AI</span> planning platform</h2>
+          <div class="about-timeline">
+            {"".join(timeline_rows)}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    team_cards_markup = "".join(
+        f"""
+        <article class="about-member-card">
+          <div class="avatar-wrapper">
+            <div class="avatar team-avatar">
+              <img src="{html.escape(image_src, quote=True)}" alt="{html.escape(name)} portrait" loading="lazy" />
+            </div>
+          </div>
+          <h3>{html.escape(name)}</h3>
+          <div class="about-member-role">{html.escape(role)}</div>
+          <p>{_brand_name_in_text_html(bio)}</p>
+        </article>
+        """
+        for name, role, bio, image_src in team_members
+    )
+
+    st.write("")
+    st.markdown(
+        f"""
+        <div class="about-team-section">
+          <div class="about-team-head">
+            <span class="about-team-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M16 19v-1.2c0-1.8-1.8-3.3-4-3.3s-4 1.5-4 3.3V19"></path>
+                <circle cx="12" cy="8.2" r="2.9"></circle>
+                <path d="M20 18v-.9c0-1.3-1-2.5-2.5-3"></path>
+                <path d="M17.5 5.8a2.5 2.5 0 0 1 0 4.8"></path>
+                <path d="M4 18v-.9c0-1.3 1-2.5 2.5-3"></path>
+                <path d="M6.5 5.8a2.5 2.5 0 0 0 0 4.8"></path>
+              </svg>
+            </span>
+            <h2 class="about-section-heading">Leadership Team</h2>
+          </div>
+          <div class="about-team-grid">
+            {team_cards_markup}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.write("")
+    cta_left, cta_center, cta_right = st.columns([1, 1.8, 1], gap="large")
+    with cta_center:
+        st.subheader("Ready to Transform Your Projects?")
+        st.write(
+            f"Join 500+ enterprise teams already using {brand_name} to deliver projects with AI-powered certainty."
+        )
+        if st.button("Contact Sales", key="about_contact_sales_button", type="primary", use_container_width=True):
+            _set_query_page("contact")
+            st.rerun()
 
 
 def _render_contact() -> None:
+    contact_social_markup = "".join(
+        _footer_social_icon_markup(platform, label)
+        for platform, label in FOOTER_SOCIALS
+    )
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
           <div class="page-grid">
             <div class="glass page-hero-card">
               <span class="kicker">Contact Us</span>
-              <h1 class="page-title">Talk to the team behind cert<span class="ai-gradient">AI</span>n.</h1>
+              <h1 class="page-title">Talk to the team behind {_brand_name_html()}.</h1>
               <p class="page-copy">
                 Book a demo, discuss enterprise rollout, or use this page in your capstone presentation to show a production-style contact journey.
               </p>
+              <p class="page-copy">
+                If you cannot find the answer to your question in the <a href="{_href("faq")}" class="auth-inline-link">FAQ</a>, please submit your inquiry using the contact form below.
+              </p>
             </div>
-            <div class="glass page-hero-card">
-              <span class="eyebrow">Direct lines</span>
-              <div class="data-pair"><span>Email</span><strong>hello@certain.ai</strong></div>
-              <div class="data-pair"><span>Phone</span><strong>+49 30 5555 2040</strong></div>
-              <div class="data-pair"><span>Sales</span><strong>enterprise@certain.ai</strong></div>
-              <div class="data-pair"><span>Support SLA</span><strong>&lt; 2 business hours</strong></div>
+            <div class="contact-top-stack">
+              <div class="glass page-hero-card">
+                <div class="data-pair"><span>Email</span><strong><a href="mailto:info@certain-pm.com">info@certain-pm.com</a></strong></div>
+                <div class="data-pair"><span>Phone</span><strong><a href="tel:+13105552040">+1 (310) 555-2040</a></strong></div>
+                <div class="data-pair"><span>Sales</span><strong><a href="mailto:enterprise@certain.ai.com">enterprise@certain.ai.com</a></strong></div>
+                <div class="data-pair"><span>Support</span><strong><a href="mailto:support@certain-pm.com">support@certain-pm.com</a></strong></div>
+              </div>
+              <div class="glass page-hero-card">
+                <span class="eyebrow">Global HQ</span>
+                <h3>Beverly Hills</h3>
+                <p>Rodeo Drive<br/><br/>300 Rodeo Dr<br/>Beverly Hills 90210<br/>CA, USA</p>
+              </div>
             </div>
           </div>
         </div>
@@ -4372,63 +8984,107 @@ def _render_contact() -> None:
                 st.success("Your request has been captured for the demo flow.")
     with right:
         st.markdown(
-            """
-            <div class="feature-grid">
-              <div class="feature-card">
-                <span class="eyebrow">Berlin HQ</span>
-                <h3>Alexanderplatz 8</h3>
-                <p>10178 Berlin<br/>Germany</p>
+            f"""
+            <div class="contact-right-balance">
+                <div class="feature-grid">
+                <div class="feature-card">
+                  <span class="eyebrow">Tehran</span>
+                  <h3>Niavaran Square</h3>
+                  <p>20 Niavaran<br/>Tehran 19789<br/>Tehran, Iran</p>
+                </div>
+                <div class="feature-card">
+                  <span class="eyebrow">Tel Aviv</span>
+                  <h3>Rothschild Blvd</h3>
+                  <p>50 Rothschild Blvd<br/>Tel Aviv 6688125<br/>Tel Aviv District, Israel</p>
+                </div>
+                <div class="feature-card">
+                  <span class="eyebrow">New York</span>
+                  <h3>Manhattan</h3>
+                  <p>725 5th Ave<br/>New York 10022<br/>NY, USA</p>
+                </div>
               </div>
-              <div class="feature-card">
-                <span class="eyebrow">London</span>
-                <h3>Canary Wharf</h3>
-                <p>25 Bank Street<br/>London E14</p>
-              </div>
-              <div class="feature-card">
-                <span class="eyebrow">New York</span>
-                <h3>Hudson Yards</h3>
-                <p>10th Avenue<br/>New York, NY</p>
+              <div class="contact-social-inline">
+                <strong>Connect with us</strong>
+                <div class="footer-social-row">{contact_social_markup}</div>
+                <p>LinkedIn · X · GitHub · YouTube · Instagram · Facebook</p>
               </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        st.markdown(
-            """
-            <div class="history-card" style="margin-top:1rem;">
-              <strong style="font-family:Sora,sans-serif;">Social</strong>
-              <p>LinkedIn · X · GitHub · YouTube</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
-    with st.expander("Can certAIn connect to Jira, Asana, and MS Project?"):
-        st.write("Yes. The Tools Integration page includes those connectors in the SaaS story.")
-    with st.expander("Does the platform support executive reporting?"):
-        st.write("Yes. Executive Summary and Decision Hub are designed for stakeholder-ready communication.")
-    with st.expander("Can the AI model be monitored after deployment?"):
-        st.write("Yes. The dashboard reads `risk_monitoring_snapshot.csv` to visualize monitoring drift and confidence.")
+def _render_faq() -> None:
+    left_questions = [
+        (
+            "Can certAIn connect to Jira, Asana, and MS Project?",
+            "Yes. The Tools Integration page includes those connectors in the SaaS story.",
+        ),
+        (
+            "Does the platform support executive reporting?",
+            "Yes. Executive Summary and Decision Hub are designed for stakeholder-ready communication.",
+        ),
+        (
+            "Can the AI model be monitored after deployment?",
+            "Yes. The dashboard reads `risk_monitoring_snapshot.csv` to visualize monitoring drift and confidence.",
+        ),
+        (
+            "Is certAIn limited to one industry?",
+            "No. The platform flow is designed to be generalizable across project domains, while the bundled advisory model is just one current demonstration model.",
+        ),
+        (
+            "What makes the forecasts credible?",
+            "The app combines dependency-aware task graphs, Monte Carlo simulation, and risk signals so teams can discuss ranges and confidence levels instead of a single optimistic date.",
+        ),
+    ]
+    middle_questions = [
+        (
+            "Can users upload project files in this demo?",
+            "Yes. The Project Upload page shows the intake flow and previews CSV content in the current prototype experience.",
+        ),
+        (
+            "Can certAIn compare multiple delivery scenarios?",
+            "Yes. The What-If Scenarios page is designed to compare mitigation and acceleration options before teams commit to a plan.",
+        ),
+        (
+            "Does the platform include a guided workspace experience?",
+            "Yes. The dashboard modules walk users through planning, risk analysis, simulation, scenario review, and executive reporting.",
+        ),
+        (
+            "Can results be shared with stakeholders?",
+            "Yes. The platform includes executive-ready summaries, charts, and export-oriented flows to support stakeholder conversations.",
+        ),
+        (
+            "Can certAIn help explain project risk to non-technical audiences?",
+            "Yes. The platform is designed to turn simulation outputs, delay drivers, and confidence ranges into language that sponsors and stakeholders can understand quickly.",
+        ),
+    ]
+    right_questions = [
+        (
+            "Why should project managers choose certAIn over traditional planning tools?",
+            "certAIn brings AI task generation, dependency-aware planning, Monte Carlo forecasting, scenario comparison, and executive-ready reporting into one connected workflow. Instead of forcing PMs to switch between separate tools for planning, analysis, and stakeholder communication, certAIn helps teams move from project setup to risk-aware decision-making in one platform.",
+        ),
+        (
+            "What do the Monte Carlo P50 and P80 completion bars mean?",
+            "P50 is the date with a 50% chance of completion, while P80 is the more conservative date with an 80% chance of completion.",
+        ),
+    ]
 
-
-def _render_login() -> None:
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
-          <div class="dashboard-hero-grid">
-            <div class="glass login-panel">
-              <span class="kicker">Login</span>
-              <h1 class="page-title">Access the forecast console</h1>
+          <div class="page-grid">
+            <div class="glass page-hero-card">
+              <span class="kicker">FAQ</span>
+              <h1 class="page-title">Answers to the questions people ask during the {_brand_name_html()} walkthrough.</h1>
               <p class="page-copy">
-                This is a mock SaaS login experience for the capstone. It keeps the product flow believable
-                while routing users directly into the live dashboard.
+                Use this page to explain the product story, platform scope, and the evidence behind the forecasting workflow without leaving the demo.
               </p>
             </div>
-            <div class="glass login-panel">
-              <span class="eyebrow">What happens next</span>
-              <div class="data-pair"><span>Workspace loaded</span><strong>Live demo dashboard</strong></div>
-              <div class="data-pair"><span>Default mode</span><strong>Mock-friendly</strong></div>
-              <div class="data-pair"><span>Presentation use</span><strong>Click-through flow</strong></div>
+            <div class="glass page-hero-card faq-summary-card">
+              <div class="data-pair"><span>Audience</span><strong>Project &amp; Product Managers, PMOs, Decision-Makers</strong></div>
+              <div class="data-pair"><span>Focus</span><strong>AI-driven planning, dependency modeling, risk forecasting, decision support</strong></div>
+              <div class="data-pair"><span>Coverage</span><strong>End-to-end workflow: planning → simulation → monitoring → iteration</strong></div>
+              <div class="data-pair"><span>Format</span><strong>Clear, actionable, presentation-ready insights</strong></div>
             </div>
           </div>
         </div>
@@ -4436,27 +9092,308 @@ def _render_login() -> None:
         unsafe_allow_html=True,
     )
 
-    left, right = st.columns([1.05, 0.95], gap="large")
-    with left:
-        email = st.text_input("Work email", value=st.session_state.saas_user_email, key="login_email")
-        password = st.text_input("Password", value="demo-password", type="password", key="login_password")
-        if st.button("Continue to Dashboard", type="primary", use_container_width=True):
-            st.session_state.saas_user_email = email
-            _set_query_page("dashboard")
-            st.rerun()
-    with right:
-        st.markdown(
-            """
-            <div class="history-card">
-              <strong style="font-family:Sora,sans-serif;">Why keep this page?</strong>
-              <p>
-                It makes the app feel like a real SaaS entry point during presentations and gives the
-                navigation a complete product arc from landing page to dashboard.
-              </p>
+    left_col, middle_col, right_col = st.columns(3, gap="large")
+    with left_col:
+        for question, answer in left_questions:
+            with st.expander(question):
+                st.write(answer)
+
+    with middle_col:
+        for question, answer in middle_questions:
+            with st.expander(question):
+                st.write(answer)
+
+    with right_col:
+        for question, answer in right_questions:
+            with st.expander(question):
+                st.write(answer)
+        for _ in range(3):
+            st.markdown('<div class="faq-empty-box"></div>', unsafe_allow_html=True)
+
+
+def _render_legal_page(page: str) -> None:
+    legal_pages: dict[str, dict[str, str]] = {
+        "privacy-policy": {
+            "kicker": "Privacy Policy",
+            "title": "How certAIn handles personal and project-related information.",
+            "intro": "This demo page represents the privacy layer of the platform and explains how contact details, project inputs, and workflow signals would be handled in a production-style environment.",
+            "scope": "Data scope",
+            "scope_value": "Contact details, workspace inputs, and planning metadata",
+            "purpose": "Use of data",
+            "purpose_value": "Platform access, forecasting workflows, and product communication",
+            "control": "User controls",
+            "control_value": "Review, update, or request removal through support channels",
+            "note": "Presentation note",
+            "note_value": "Shown here as a product-trust page for the capstone platform",
+        },
+        "terms-of-service": {
+            "kicker": "Terms of Service",
+            "title": "The product-use terms that frame access to certAIn.",
+            "intro": "This page presents the platform terms at a product-story level, including acceptable use, trial access, and expectations around evaluation or enterprise rollout conversations.",
+            "scope": "Applies to",
+            "scope_value": "Trial users, team pilots, and enterprise evaluations",
+            "purpose": "Use of platform",
+            "purpose_value": "Project planning, forecasting, simulation, and reporting workflows",
+            "control": "Account expectations",
+            "control_value": "Responsible access, protected credentials, and lawful use",
+            "note": "Presentation note",
+            "note_value": "Structured as a SaaS trust page within the demo experience",
+        },
+        "cookie-settings": {
+            "kicker": "Cookie Settings",
+            "title": "How browser preferences and consent controls would be managed.",
+            "intro": "This page represents the preferences layer for analytics, language persistence, and session experience in a production-style product environment.",
+            "scope": "Preference areas",
+            "scope_value": "Language, session continuity, analytics, and UI preferences",
+            "purpose": "Primary use",
+            "purpose_value": "Improve navigation, remember settings, and support product insights",
+            "control": "User controls",
+            "control_value": "Adjustable through browser and in-product preference settings",
+            "note": "Presentation note",
+            "note_value": "Included to make the platform footer feel complete and credible",
+        },
+        "security-data-protection": {
+            "kicker": "Security & Data Protection",
+            "title": "How certAIn frames security, privacy, and data protection.",
+            "intro": "This page summarizes the product's trust posture, including access controls, monitoring, compliance framing, and enterprise-style data protection expectations.",
+            "scope": "Security focus",
+            "scope_value": "Access control, monitoring, privacy, and controlled sharing",
+            "purpose": "Protection model",
+            "purpose_value": "Safeguard user data, project context, and reporting outputs",
+            "control": "Trust signals",
+            "control_value": "Compliance badges, secure flows, and privacy-forward design",
+            "note": "Presentation note",
+            "note_value": "Supports the trust and enterprise-readiness story of the platform",
+        },
+    }
+
+    content = legal_pages.get(page)
+    if not content:
+        _render_dashboard()
+        return
+
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell">
+              <div class="page-grid">
+                <div class="glass page-hero-card">
+                  <span class="kicker">{content["kicker"]}</span>
+                  <h1 class="page-title">{content["title"]}</h1>
+                  <p class="page-copy">
+                    {content["intro"]}
+                  </p>
+                  <div style="margin-top:1.25rem; display:flex; gap:0.9rem; flex-wrap:wrap;">
+                    <a href="{_href("home")}" class="btn btn-primary">Back to Home</a>
+                    <a href="{_href("contact")}" class="btn btn-secondary">Contact Us</a>
+                  </div>
+                </div>
+                <div class="glass page-hero-card">
+                  <div class="data-pair"><span>{content["scope"]}</span><strong>{content["scope_value"]}</strong></div>
+                  <div class="data-pair"><span>{content["purpose"]}</span><strong>{content["purpose_value"]}</strong></div>
+                  <div class="data-pair"><span>{content["control"]}</span><strong>{content["control_value"]}</strong></div>
+                  <div class="data-pair"><span>{content["note"]}</span><strong>{content["note_value"]}</strong></div>
+                </div>
+              </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_subscription_confirmation() -> None:
+    subscribed_email = st.session_state.get("contact_email", "").strip()
+    safe_email = html.escape(subscribed_email)
+    confirmed = bool(st.session_state.get("newsletter_confirmed"))
+    delivery_status = st.session_state.get("newsletter_delivery_status", "")
+    delivery_message = html.escape(st.session_state.get("newsletter_delivery_message", "").strip())
+
+    if confirmed:
+        title = "Subscription confirmed."
+        intro = (
+            f"<strong>{safe_email}</strong> is now confirmed for certAIn updates."
+            if subscribed_email
+            else "Your subscription is now confirmed."
         )
+        status_pairs = [
+            ("Status", "Confirmed"),
+            ("Updates", "Product and release news"),
+            ("Flow", "Email confirmation completed"),
+        ]
+    else:
+        title = "Check your email to confirm the subscription."
+        if delivery_status == "sent":
+            intro = delivery_message
+        elif delivery_status == "disabled":
+            intro = (
+                "Email delivery is not configured yet, so the app could not send the confirmation message."
+            )
+        elif delivery_status == "error":
+            intro = delivery_message or "We could not send the confirmation email right now."
+        else:
+            intro = (
+                f"We are preparing the confirmation email for <strong>{safe_email}</strong>."
+                if subscribed_email
+                else "We are preparing your confirmation email."
+            )
+        status_pairs = [
+            ("Confirmation", "Email verification"),
+            ("Updates", "Product and release news"),
+            ("Flow", "Footer subscribe experience"),
+        ]
+
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell">
+              <div class="page-grid">
+                <div class="glass page-hero-card">
+                  <span class="kicker">Newsletter</span>
+                  <h1 class="page-title">{title}</h1>
+                  <p class="page-copy">
+                    {intro}
+                  </p>
+                  <div style="margin-top:1.25rem; display:flex; gap:0.9rem; flex-wrap:wrap;">
+                    <a href="{_href("home")}" class="btn btn-primary">Back to Home</a>
+                    <a href="{_href("product")}" class="btn btn-secondary">Explore Product</a>
+                  </div>
+                </div>
+                <div class="glass page-hero-card">
+                  <span class="eyebrow">What happens next</span>
+                  {"".join(f'<div class="data-pair"><span>{label}</span><strong>{value}</strong></div>' for label, value in status_pairs)}
+                </div>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_registration_confirmation() -> None:
+    registered_email = st.session_state.get("registration_email", "").strip()
+    safe_email = html.escape(registered_email)
+    delivery_status = st.session_state.get("registration_delivery_status", "")
+    delivery_message = html.escape(st.session_state.get("registration_delivery_message", "").strip())
+    email_status = "Confirmation email sent" if delivery_status == "sent" else "Email delivery pending"
+
+    if delivery_status == "sent":
+        intro = delivery_message
+    elif delivery_status == "disabled":
+        intro = "Your registration has been confirmed, but the confirmation email could not be sent yet."
+    elif delivery_status == "error":
+        intro = delivery_message or "Your registration has been confirmed, but the confirmation email could not be sent right now."
+    else:
+        intro = (
+            f"<strong>{safe_email}</strong> is now registered with certAIn."
+            if registered_email
+            else "Your certAIn registration is complete."
+        )
+
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell">
+              <div class="page-grid">
+                <div class="glass page-hero-card">
+                  <span class="kicker">Registration</span>
+                  <h1 class="page-title">Your registration has been confirmed.</h1>
+                  <p class="page-copy">
+                    {intro}
+                  </p>
+                  <div style="margin-top:1.25rem; display:flex; gap:0.9rem; flex-wrap:wrap;">
+                    <a href="{_href("pricing")}" class="btn btn-primary">Continue to Pricing</a>
+                    <a href="{_href("dashboard")}" class="btn btn-secondary">Open Dashboard</a>
+                  </div>
+                </div>
+                <div class="glass page-hero-card">
+                  <span class="eyebrow">What happens next</span>
+                  <div class="data-pair"><span>Status</span><strong>Registration complete</strong></div>
+                  <div class="data-pair"><span>Email</span><strong>{safe_email or "Stored for this session"}</strong></div>
+                  <div class="data-pair"><span>Flow</span><strong>{email_status}</strong></div>
+                </div>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_login() -> None:
+    logo_uri = _nav_logo_data_uri()
+    selected_language = st.session_state.get("saas_language_code", "en")
+    welcome_title = "خوش آمدید" if selected_language == "fa" else "Welcome back"
+    google_label = "ادامه با گوگل" if selected_language == "fa" else "Continue with Google"
+    logo_markup = (
+        f'<img src="{logo_uri}" class="auth-logo-image" alt="certAIn logo" />'
+        if logo_uri
+        else '<span class="auth-logo-fallback">A</span>'
+    )
+    st.markdown(
+        dedent(
+            f"""
+            <div class="page-shell auth-page-shell">
+              <div class="auth-card">
+                <div class="auth-logo-shell">{logo_markup}</div>
+                <h1 class="auth-title">{welcome_title}</h1>
+                <p class="auth-title-helper">Don't have an account?</p>
+                <form class="auth-form-shell" method="get" action="">
+                  <input type="hidden" name="page" value="registration-confirmation" />
+                  <input type="hidden" name="lang" value="{st.session_state.get("saas_language_code", "en")}" />
+                  <div class="auth-preview-stack">
+                    <div class="auth-field-group">
+                      <label>Email</label>
+                      <input class="auth-input-field" type="email" name="register_email" placeholder="team@certain.ai" autocomplete="email" />
+                    </div>
+                    <div class="auth-field-group">
+                      <label>Password</label>
+                      <input class="auth-input-field password" type="password" placeholder="........" autocomplete="new-password" />
+                    </div>
+                  </div>
+                  <button type="submit" class="auth-register-button">Register Now</button>
+                </form>
+                <div class="auth-social-stack">
+                  <a href="{_href("dashboard")}" class="auth-social-button">
+                    <span>{google_label}</span>
+                  </a>
+                  <a href="{_href("dashboard")}" class="auth-social-button">
+                    <span class="auth-social-icon apple"></span>
+                    <span>Continue with Apple</span>
+                  </a>
+                </div>
+                <div class="auth-separator"><span>or continue with email</span></div>
+                <form class="auth-form-shell" method="get" action="">
+                  <input type="hidden" name="page" value="pricing" />
+                  <input type="hidden" name="lang" value="{st.session_state.get("saas_language_code", "en")}" />
+                  <div class="auth-field-group">
+                    <label>Email</label>
+                    <input class="auth-input-field" type="email" name="auth_email" placeholder="you@company.com" autocomplete="email" />
+                  </div>
+                  <div class="auth-field-group">
+                    <label>Password</label>
+                    <input class="auth-input-field password" type="password" placeholder="........" autocomplete="current-password" />
+                  </div>
+                  <div class="auth-meta-row">
+                    <label class="auth-check-row">
+                      <input type="checkbox" class="auth-checkbox-input" name="remember_me" />
+                      <span>Remember me</span>
+                    </label>
+                    <a href="{_href("contact")}" class="auth-forgot-link">Forgot password?</a>
+                  </div>
+                  <button type="submit" class="auth-submit-button">Sign In</button>
+                </form>
+              </div>
+              <div class="auth-trust-row">
+                <span class="auth-trust-pill"><span class="auth-trust-dot"></span>256-bit encryption</span>
+                <span class="auth-trust-pill"><span class="auth-trust-dot"></span>SOC2 &amp; GDPR</span>
+              </div>
+            </div>
+            """
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def _render_dashboard() -> None:
@@ -4743,15 +9680,14 @@ def _render_dashboard() -> None:
 
 
 def _render_user_guide() -> None:
-    _render_command_bar()
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
           <div class="glass dashboard-banner">
             <span class="kicker">User Guide</span>
-            <h1 class="page-title">Welcome to the certAIn workspace.</h1>
+            <h1 class="page-title">Welcome to the {_brand_name_html()} workspace.</h1>
             <p class="page-copy">
-              This landing page helps judges and users understand how to move through the platform from upload to executive reporting.
+              This landing page helps our users understand how to move through the platform from upload to executive reporting.
             </p>
           </div>
         </div>
@@ -4759,32 +9695,303 @@ def _render_user_guide() -> None:
         unsafe_allow_html=True,
     )
 
-    checklist_cols = st.columns(4, gap="large")
-    checklist_items = [
-        ("1", "Upload your first project"),
-        ("2", "Run AI analysis"),
-        ("3", "Review risk assessment"),
-        ("4", "Generate executive report"),
-    ]
-    for column, (step, label) in zip(checklist_cols, checklist_items):
-        column.markdown(
-            f"""
-            <div class="history-card">
-              <span class="eyebrow">Step {step}</span>
-              <strong style="font-family:Sora,sans-serif;">{label}</strong>
+    st.markdown(
+        """
+        <div class="guide-how-section">
+          <div class="guide-how-head">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 6l3-3"></path>
+              <path d="M4 10l4-4 3 3-4 4z"></path>
+              <path d="M13 11l3-3"></path>
+              <path d="M9 15l4-4 3 3-4 4z"></path>
+              <path d="M17 7l3-3"></path>
+            </svg>
+            <span>How It Works</span>
+          </div>
+          <div class="glass guide-how-shell">
+            <div class="guide-how-grid">
+              <div class="guide-how-card">
+                <span class="guide-how-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 16V5"></path>
+                    <path d="M8 9l4-4 4 4"></path>
+                    <path d="M5 17v2h14v-2"></path>
+                  </svg>
+                </span>
+                <strong>Upload</strong>
+                <span>Import your project plan</span>
+              </div>
+              <div class="guide-how-card">
+                <span class="guide-how-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M10 5a3 3 0 1 0-6 0c0 1.6 1.1 2.8 2.4 3.4"></path>
+                    <path d="M14 5a3 3 0 1 1 6 0c0 1.6-1.1 2.8-2.4 3.4"></path>
+                    <path d="M7 13a3 3 0 1 0 0 6"></path>
+                    <path d="M17 13a3 3 0 1 1 0 6"></path>
+                    <path d="M7 8h10"></path>
+                    <path d="M12 8v8"></path>
+                  </svg>
+                </span>
+                <strong>Analyze</strong>
+                <span>AI scans for risks</span>
+              </div>
+              <div class="guide-how-card">
+                <span class="guide-how-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M3 12h4l2-6 4 12 2-6h6"></path>
+                  </svg>
+                </span>
+                <strong>Simulate</strong>
+                <span>Run Monte Carlo forecasts</span>
+              </div>
+              <div class="guide-how-card">
+                <span class="guide-how-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 3l7 4v5c0 5-3.5 8.5-7 9-3.5-.5-7-4-7-9V7l7-4z"></path>
+                  </svg>
+                </span>
+                <strong>Review</strong>
+                <span>Check AI insights</span>
+              </div>
+              <div class="guide-how-card">
+                <span class="guide-how-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M7 4h7l5 5v11H7z"></path>
+                    <path d="M14 4v5h5"></path>
+                    <path d="M10 13h4"></path>
+                    <path d="M10 17h4"></path>
+                  </svg>
+                </span>
+                <strong>Share</strong>
+                <span>Export executive report</span>
+              </div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+          </div>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
-    quick_cols = st.columns(4)
-    labels = ["Upload Project", "Run Risk Analysis", "View Reports", "Explore AI Features"]
-    routes = ["upload", "risk-intelligence", "summary", "forecasting"]
-    for col, label, route in zip(quick_cols, labels, routes):
-        with col:
-            if st.button(label, key=f"guide_{route}", use_container_width=True):
-                _set_query_page(route)
-                st.rerun()
+    st.markdown(
+        f"""
+        <section id="modules" class="guide-modules-section">
+          <div class="guide-modules-layout">
+            <div class="guide-modules-main">
+              <div class="guide-modules-head">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 5h7v7H4z"></path>
+                  <path d="M13 5h7v7h-7z"></path>
+                  <path d="M4 13h7v7H4z"></path>
+                  <path d="M13 13h7v7h-7z"></path>
+                </svg>
+                <span>Modules</span>
+              </div>
+              <div class="guide-modules-grid">
+                <a class="guide-module-card guide-module-link" href="{_href("decision-hub")}">
+                  <div class="guide-module-head">
+                    <span class="guide-module-icon decision" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M5 5h5v5H5z"></path>
+                        <path d="M14 5h5v5h-5z"></path>
+                        <path d="M5 14h5v5H5z"></path>
+                        <path d="M14 14h5v5h-5z"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-module-title">Decision Hub</span>
+                  </div>
+                  <p class="guide-module-copy">
+                    Your command center for project intelligence. Real-time overview of project health, key metrics, and AI-powered predictive alerts.
+                  </p>
+                  <div class="guide-module-preview guide-sparkline" aria-hidden="true">
+                    <svg viewBox="0 0 420 84" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="guideDecisionFill" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stop-color="#386dff" stop-opacity="0.24" />
+                          <stop offset="100%" stop-color="#19d4d3" stop-opacity="0.06" />
+                        </linearGradient>
+                        <linearGradient id="guideDecisionStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stop-color="#7b62ff" />
+                          <stop offset="100%" stop-color="#26d6e7" />
+                        </linearGradient>
+                      </defs>
+                      <path d="M0 18H420" stroke="rgba(255,196,92,0.45)" stroke-width="1.5" stroke-dasharray="7 7"></path>
+                      <path d="M0 70C42 70 70 68 98 64C128 60 151 56 177 50C211 43 244 32 279 24C316 16 352 10 420 10V84H0Z" fill="url(#guideDecisionFill)"></path>
+                      <path d="M0 70C42 70 70 68 98 64C128 60 151 56 177 50C211 43 244 32 279 24C316 16 352 10 420 10" stroke="url(#guideDecisionStroke)" stroke-width="3.2" fill="none" stroke-linecap="round"></path>
+                    </svg>
+                  </div>
+                </a>
+                <a class="guide-module-card guide-module-link" href="{_href("task-architect")}">
+                  <div class="guide-module-head">
+                    <span class="guide-module-icon task" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M10 5a3 3 0 1 0-6 0c0 1.6 1.1 2.8 2.4 3.4"></path>
+                        <path d="M14 5a3 3 0 1 1 6 0c0 1.6-1.1 2.8-2.4 3.4"></path>
+                        <path d="M7 13a3 3 0 1 0 0 6"></path>
+                        <path d="M17 13a3 3 0 1 1 0 6"></path>
+                        <path d="M7 8h10"></path>
+                        <path d="M12 8v8"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-module-title">AI Task Architect</span>
+                  </div>
+                  <p class="guide-module-copy">
+                    Let AI decompose your project goal into structured tasks with dependencies, durations, and risk assessments.
+                  </p>
+                  <div class="guide-module-preview">
+                    <span class="guide-module-note-kicker">AI Analysis</span>
+                    <p class="guide-module-note-copy">
+                      Project health: 72/100. API Integration is the primary risk driver (78% delay probability). Recommend adding 5-day buffer to critical path. Budget performance strong at 1.08 CPI.
+                    </p>
+                  </div>
+                </a>
+                <a class="guide-module-card guide-module-link" href="{_href("simulator")}">
+                  <div class="guide-module-head">
+                    <span class="guide-module-icon monte" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M3 12h4l2-6 4 12 2-6h6"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-module-title">Monte Carlo Simulator</span>
+                  </div>
+                  <p class="guide-module-copy">
+                    Run thousands of probabilistic simulations to forecast timelines with P50 and P80 confidence.
+                  </p>
+                  <div class="guide-module-preview guide-monte-preview" aria-hidden="true">
+                    <svg viewBox="0 0 420 84" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="guideMonteFill" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stop-color="#4f89ff" stop-opacity="0.95" />
+                          <stop offset="100%" stop-color="#2e66c7" stop-opacity="0.85" />
+                        </linearGradient>
+                      </defs>
+                      <rect x="8" y="72" width="16" height="4" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="28" y="68" width="16" height="8" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="48" y="62" width="16" height="14" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="68" y="54" width="16" height="22" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="88" y="44" width="16" height="32" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="108" y="34" width="16" height="42" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="128" y="25" width="16" height="51" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="148" y="18" width="16" height="58" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="168" y="12" width="16" height="64" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="188" y="9" width="16" height="67" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="208" y="7" width="16" height="69" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="228" y="8" width="16" height="68" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="248" y="13" width="16" height="63" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="268" y="24" width="16" height="52" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="288" y="36" width="16" height="40" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="308" y="45" width="16" height="31" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="328" y="54" width="16" height="22" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="348" y="62" width="16" height="14" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="368" y="68" width="16" height="8" rx="4" fill="url(#guideMonteFill)"></rect>
+                      <rect x="388" y="72" width="16" height="4" rx="4" fill="url(#guideMonteFill)"></rect>
+                    </svg>
+                  </div>
+                </a>
+                <a class="guide-module-card guide-module-link" href="{_href("summary")}">
+                  <div class="guide-module-head">
+                    <span class="guide-module-icon summary" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M7 4h7l5 5v11H7z"></path>
+                        <path d="M14 4v5h5"></path>
+                        <path d="M10 13h4"></path>
+                        <path d="M10 17h4"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-module-title">Executive Summary</span>
+                  </div>
+                  <p class="guide-module-copy">
+                    Generate stakeholder-ready reports with health scores, SPI/CPI, and prioritized mitigation actions.
+                  </p>
+                  <div class="guide-module-preview">
+                    <span class="guide-module-note-kicker">AI Analysis</span>
+                    <p class="guide-module-note-copy">
+                      Project health: 72/100. API Integration is the primary risk driver (78% delay probability). Recommend adding 5-day buffer to critical path. Budget performance strong at 1.08 CPI.
+                    </p>
+                  </div>
+                </a>
+              </div>
+            </div>
+            <aside class="guide-activity-panel">
+              <h3 class="guide-activity-title">AI Activity</h3>
+              <div class="guide-activity-block">
+                <p class="guide-activity-subhead">Live AI Activity</p>
+                <div class="guide-activity-list">
+                  <div class="guide-activity-item">
+                    <span class="guide-activity-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M4 18l5-5 3 3 8-8"></path>
+                        <path d="M15 8h5v5"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-activity-copy">Dependency graph recalculated — critical path: 42 days</span>
+                    <span class="guide-activity-time">Just now</span>
+                  </div>
+                  <div class="guide-activity-item">
+                    <span class="guide-activity-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M7 4h7l5 5v11H7z"></path>
+                        <path d="M14 4v5h5"></path>
+                        <path d="M10 13h4"></path>
+                        <path d="M10 17h4"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-activity-copy">Executive report generated with 4 mitigation actions</span>
+                    <span class="guide-activity-time">Just now</span>
+                  </div>
+                  <div class="guide-activity-item">
+                    <span class="guide-activity-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M4 19h16"></path>
+                        <path d="M7 15l3-4 3 2 4-6"></path>
+                        <path d="M7 9h.01"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-activity-copy">Schedule performance index updated: SPI 0.94</span>
+                    <span class="guide-activity-time">Just now</span>
+                  </div>
+                  <div class="guide-activity-item">
+                    <span class="guide-activity-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M3 12h4l2-6 4 12 2-6h6"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-activity-copy">Monte Carlo simulation finished — 10,000 runs processed</span>
+                    <span class="guide-activity-time">Just now</span>
+                  </div>
+                </div>
+              </div>
+              <div class="guide-activity-block">
+                <p class="guide-activity-subhead">Quick Actions</p>
+                <div class="guide-activity-actions">
+                  <a href="{_href("simulator")}" class="guide-activity-action">
+                    <span class="guide-activity-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M3 12h4l2-6 4 12 2-6h6"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-activity-action-label">Start Simulation</span>
+                    <span class="guide-activity-action-arrow" aria-hidden="true">→</span>
+                  </a>
+                  <a href="{_href("summary")}" class="guide-activity-action">
+                    <span class="guide-activity-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M7 4h7l5 5v11H7z"></path>
+                        <path d="M14 4v5h5"></path>
+                        <path d="M10 13h4"></path>
+                        <path d="M10 17h4"></path>
+                      </svg>
+                    </span>
+                    <span class="guide-activity-action-label">Generate Report</span>
+                    <span class="guide-activity-action-arrow" aria-hidden="true">→</span>
+                  </a>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         """
@@ -4799,6 +10006,99 @@ def _render_user_guide() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _decision_hub_completion_label(days: float) -> str:
+    projected_date = (datetime.now(tz=UTC) + timedelta(days=max(1, int(round(days))))).date()
+    return projected_date.strftime("%b %d").replace(" 0", " ")
+
+
+def _decision_hub_confidence_series(completion: Any) -> pd.DataFrame:
+    values = sorted(float(value) for value in completion if pd.notna(value))
+    if not values:
+        return pd.DataFrame(
+            [
+                {"week": "W1", "confidence": 0.0, "threshold": 80.0},
+                {"week": "W2", "confidence": 0.0, "threshold": 80.0},
+            ]
+        )
+
+    max_weeks = max(8, min(30, int((max(values) + 4) // 5) + 2))
+    rows: list[dict[str, float | str]] = []
+    for week_index in range(1, max_weeks + 1):
+        day_mark = float(week_index * 5)
+        confidence = round(
+            (sum(1 for value in values if value <= day_mark) / float(len(values))) * 100.0,
+            1,
+        )
+        rows.append({"week": f"W{week_index}", "confidence": confidence, "threshold": 80.0})
+    return pd.DataFrame(rows)
+
+
+def _decision_hub_confidence_chart(series_df: pd.DataFrame) -> Any:
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=series_df["week"],
+            y=series_df["threshold"],
+            mode="lines",
+            name="80% target",
+            line=dict(color="#f5c56b", width=2, dash="dash"),
+            hovertemplate="%{x}<br>Target %{y:.0f}%<extra></extra>",
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=series_df["week"],
+            y=series_df["confidence"],
+            mode="lines",
+            name="Confidence",
+            line=dict(color="#5b6cff", width=3),
+            fill="tozeroy",
+            fillcolor="rgba(91, 108, 255, 0.26)",
+            hovertemplate="%{x}<br>Confidence %{y:.1f}%<extra></extra>",
+        )
+    )
+    figure.update_layout(
+        height=260,
+        margin=dict(l=18, r=16, t=20, b=20),
+        showlegend=True,
+    )
+    figure.update_yaxes(range=[0, 100], ticksuffix="%", tick0=0, dtick=20)
+    figure.update_xaxes(title_text="")
+    return _theme_chart(figure)
+
+
+def _decision_hub_gauge_figure(value: float, accent_color: str) -> Any:
+    figure = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=max(0.0, min(100.0, value)),
+            number={"suffix": "%", "font": {"size": 34, "family": "Sora, sans-serif"}},
+            gauge={
+                "axis": {
+                    "range": [0, 100],
+                    "tickvals": [0, 25, 50, 75, 100],
+                    "tickfont": {"color": "#8fa5c5", "size": 10},
+                },
+                "bar": {"color": accent_color, "thickness": 0.34},
+                "bgcolor": "rgba(255,255,255,0.03)",
+                "borderwidth": 0,
+                "steps": [
+                    {"range": [0, 40], "color": "rgba(255,127,140,0.14)"},
+                    {"range": [40, 70], "color": "rgba(245,197,107,0.13)"},
+                    {"range": [70, 100], "color": "rgba(24,209,199,0.12)"},
+                ],
+            },
+        )
+    )
+    figure.update_layout(
+        height=205,
+        margin=dict(l=16, r=16, t=10, b=4),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#f4f8ff", family="Manrope, sans-serif"),
+    )
+    return figure
 
 
 def _render_decision_hub() -> None:
@@ -4819,173 +10119,1494 @@ def _render_decision_hub() -> None:
         ),
     )
 
-    gauge = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=health_score,
-            number={"suffix": ""},
-            title={"text": "Project health score"},
-            gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "#64a2ff"},
-                "bgcolor": "rgba(255,255,255,0.04)",
-                "steps": [
-                    {"range": [0, 50], "color": "rgba(255,127,140,0.28)"},
-                    {"range": [50, 75], "color": "rgba(245,197,107,0.2)"},
-                    {"range": [75, 100], "color": "rgba(24,209,199,0.18)"},
-                ],
-            },
-        )
+    delay_probability_pct = metrics["delay_probability"] * 100.0
+    confidence_score = _confidence_score(metrics)
+    expected_completion = _decision_hub_completion_label(metrics["p50"])
+    budget_overrun = float(portfolio["avg_budget_overrun"])
+    budget_risk = "Low" if budget_overrun <= 5 else "Moderate" if budget_overrun <= 12 else "High"
+    risk_driver_ranking = payload.get("drivers")
+    if "risk_driver_ranking" not in locals() or risk_driver_ranking is None:
+        risk_driver_ranking = []
+    top_driver_name = (
+        risk_driver_ranking[0].get("task_name", "Unknown driver")
+        if isinstance(risk_driver_ranking, list)
+        and len(risk_driver_ranking) > 0
+        and isinstance(risk_driver_ranking[0], dict)
+        else "Unknown driver"
     )
-    gauge.update_layout(height=360)
+    alerts = [
+        {
+            "type": "critical",
+            "msg": "Product scope and requirements leads the risk stack and appears on the critical path in 100% of simulations.",
+        },
+        {
+            "type": "warning",
+            "msg": "Monitoring drift averages 0.383; executive commitments should stay closer to the P80 forecast until variance narrows.",
+        },
+        {
+            "type": "warning",
+            "msg": "Portfolio delay rate is 66.1% with average forecast error of 15.2 days.",
+        },
+        {
+            "type": "info",
+            "msg": "Project health is 79/100 with a modeled deadline miss risk of 0.0%.",
+        },
+    ]
 
-    st.plotly_chart(_theme_chart(gauge), use_container_width=True)
-
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Schedule Performance", f"{max(0.7, 1 - metrics['delay_probability'] * 0.25):.2f}")
-    metric_cols[1].metric("Cost Performance", f"{max(0.6, 1 - portfolio['avg_budget_overrun'] / 100):.2f}")
-    metric_cols[2].metric("Risk Score", f"{metrics['delay_probability'] * 100:.1f}")
-    metric_cols[3].metric("Team Velocity", f"{max(62.0, 100 - portfolio['avg_forecast_error']):.1f}")
+    insight_cards = [
+        {
+            "title": "Critical Path Analysis",
+            "points": [
+                f"{top_driver_name} is the top delay driver across this forecast run.",
+                f"{len(payload['critical_path'])} tasks define the current longest path through the plan.",
+                f"Baseline path duration is {payload['critical_path_days']:.1f} days before mitigation.",
+            ],
+        },
+        {
+            "title": "Resource Optimization",
+            "points": [
+                f"Portfolio delay rate sits at {portfolio['delayed_pct']:.1f}% across {int(portfolio['projects'])} historical projects.",
+                f"Average budget overrun is {budget_overrun:.1f}% while forecast error averages {portfolio['avg_forecast_error']:.1f} days.",
+                f"Monitoring accuracy is {monitoring['accuracy_pct']:.1f}% for recent risk snapshots.",
+            ],
+        },
+        {
+            "title": "Schedule Prediction",
+            "points": [
+                f"P50 completion lands around {expected_completion} ({metrics['p50']:.1f} days).",
+                f"P80 commitment is {metrics['p80']:.1f} days with {delay_probability_pct:.1f}% miss risk.",
+                f"Current project health holds at {health_score:.0f}/100 based on schedule, risk, and drift.",
+            ],
+        },
+    ]
 
     st.markdown(
-        f"""
-        <div class="history-card">
-          <strong style="font-family:Sora,sans-serif;">AI recommendations</strong>
-          <p>Increase mitigation on <strong>{payload['drivers'][0]['task_name'] if payload['drivers'] else 'critical dependencies'}</strong>, review the scenario lab before committing the deadline, and use the monitoring drift signal ({monitoring['avg_drift']:.3f}) to explain why executive caution is still justified.</p>
+        """
+        <style>
+        .decision-hub-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .decision-hub-header h1 {
+          margin: 0;
+          font-family: Sora, sans-serif;
+          font-size: clamp(1.9rem, 2.6vw, 2.45rem);
+          line-height: 1.02;
+          color: #f4f8ff;
+        }
+
+        .decision-hub-header p {
+          margin: 0.45rem 0 0;
+          color: #92a4bf;
+          font-size: 0.98rem;
+        }
+
+        .decision-status-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.55rem;
+          min-height: 44px;
+          padding: 0.8rem 1rem;
+          border-radius: 16px;
+          border: 1px solid rgba(100, 162, 255, 0.2);
+          background: rgba(6, 12, 24, 0.7);
+          color: #8ef0af;
+          font-size: 0.82rem;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+
+        .decision-status-dot {
+          width: 9px;
+          height: 9px;
+          border-radius: 999px;
+          background: #27d37b;
+          box-shadow: 0 0 0 0 rgba(39, 211, 123, 0.36);
+          animation: decisionPulse 1.8s infinite;
+        }
+
+        .decision-hub-metric-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 16px;
+          margin-bottom: 1.1rem;
+        }
+
+        .decision-hub-metric-card {
+          min-height: 138px;
+          padding: 1.15rem 1.2rem;
+          border-radius: 20px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background:
+            linear-gradient(180deg, rgba(9, 18, 31, 0.95), rgba(7, 13, 24, 0.92)) padding-box,
+            linear-gradient(135deg, rgba(155, 92, 255, 0.14), rgba(100, 162, 255, 0.14), rgba(24, 209, 199, 0.12)) border-box;
+          box-shadow: var(--shadow);
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+
+        .decision-hub-metric-card span {
+          color: #95a7c4;
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .decision-hub-metric-card strong {
+          margin-top: 0.4rem;
+          font-family: Sora, sans-serif;
+          font-size: clamp(1.45rem, 1.9vw, 1.9rem);
+          line-height: 1.05;
+          color: #f4f8ff;
+        }
+
+        .decision-hub-metric-card small {
+          color: #8ea2c0;
+          font-size: 0.82rem;
+        }
+
+        .st-key-decision_hub_health,
+        .st-key-decision_hub_main_chart,
+        .st-key-decision_hub_gauge_success,
+        .st-key-decision_hub_gauge_delay,
+        .st-key-decision_hub_alerts,
+        .st-key-decision_hub_insight_critical,
+        .st-key-decision_hub_insight_resources,
+        .st-key-decision_hub_insight_schedule {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 22px;
+          padding: 1.2rem 1.25rem;
+          background:
+            linear-gradient(180deg, rgba(9, 18, 31, 0.95), rgba(7, 13, 24, 0.92)) padding-box,
+            linear-gradient(135deg, rgba(155, 92, 255, 0.14), rgba(100, 162, 255, 0.14), rgba(24, 209, 199, 0.12)) border-box;
+          box-shadow: var(--shadow);
+        }
+
+        .st-key-decision_hub_health {
+          margin: 0.2rem 0 1.1rem;
+        }
+
+        .st-key-decision_hub_main_chart,
+        .st-key-decision_hub_gauge_success,
+        .st-key-decision_hub_gauge_delay {
+          padding-bottom: 0.45rem;
+        }
+
+        .st-key-decision_hub_alerts,
+        .st-key-decision_hub_insight_critical,
+        .st-key-decision_hub_insight_resources,
+        .st-key-decision_hub_insight_schedule {
+          margin-top: 1rem;
+        }
+
+        .decision-health-card span,
+        .decision-panel-label,
+        .decision-insight-card span {
+          color: #95a7c4;
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .decision-health-card strong {
+          display: block;
+          margin: 0.55rem 0 0.35rem;
+          font-family: Sora, sans-serif;
+          font-size: clamp(2rem, 3vw, 2.6rem);
+          color: #47e17b;
+        }
+
+        .decision-health-card p,
+        .decision-insight-card p {
+          margin: 0;
+          color: #92a4bf;
+          font-size: 0.92rem;
+        }
+
+        .decision-panel-title {
+          margin: 0 0 0.35rem;
+          font-family: Sora, sans-serif;
+          font-size: 1.08rem;
+          color: #f4f8ff;
+        }
+
+        .st-key-decision_alert_critical_0,
+        .st-key-decision_alert_warning_1,
+        .st-key-decision_alert_warning_2,
+        .st-key-decision_alert_info_3 {
+          border-radius: 16px;
+          padding: 0.92rem 1rem;
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          margin-top: 0.75rem;
+        }
+
+        .st-key-decision_alert_critical_0 {
+          background: rgba(239, 68, 68, 0.05);
+          border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .st-key-decision_alert_warning_1,
+        .st-key-decision_alert_warning_2 {
+          background: rgba(234, 179, 8, 0.05);
+          border-color: rgba(234, 179, 8, 0.2);
+        }
+
+        .st-key-decision_alert_info_3 {
+          background: rgba(59, 130, 246, 0.05);
+          border-color: rgba(59, 130, 246, 0.2);
+        }
+
+        .st-key-decision_alert_critical_0 [data-testid="stMarkdownContainer"] p,
+        .st-key-decision_alert_warning_1 [data-testid="stMarkdownContainer"] p,
+        .st-key-decision_alert_warning_2 [data-testid="stMarkdownContainer"] p,
+        .st-key-decision_alert_info_3 [data-testid="stMarkdownContainer"] p {
+          margin: 0;
+          color: #d9e5f7;
+          font-size: 0.93rem;
+          line-height: 1.65;
+        }
+
+        .st-key-decision_alert_critical_0 .stColumn:first-child [data-testid="stMarkdownContainer"] p {
+          color: #f87171;
+        }
+
+        .st-key-decision_alert_warning_1 .stColumn:first-child [data-testid="stMarkdownContainer"] p,
+        .st-key-decision_alert_warning_2 .stColumn:first-child [data-testid="stMarkdownContainer"] p {
+          color: #facc15;
+        }
+
+        .st-key-decision_alert_info_3 .stColumn:first-child [data-testid="stMarkdownContainer"] p {
+          color: #60a5fa;
+        }
+
+        .st-key-decision_alert_critical_0 .stColumn:first-child [data-testid="stMarkdownContainer"],
+        .st-key-decision_alert_warning_1 .stColumn:first-child [data-testid="stMarkdownContainer"],
+        .st-key-decision_alert_warning_2 .stColumn:first-child [data-testid="stMarkdownContainer"],
+        .st-key-decision_alert_info_3 .stColumn:first-child [data-testid="stMarkdownContainer"] {
+          text-align: center;
+          font-size: 1rem;
+          line-height: 1;
+          padding-top: 0.15rem;
+        }
+
+        .decision-insights-title {
+          margin: 1.25rem 0 0.15rem;
+          font-family: Sora, sans-serif;
+          font-size: 1.08rem;
+          color: #f4f8ff;
+        }
+
+        .decision-insight-card h4 {
+          margin: 0.45rem 0 0.75rem;
+          font-family: Sora, sans-serif;
+          font-size: 1rem;
+          color: #f4f8ff;
+        }
+
+        .decision-insight-card ul {
+          margin: 0;
+          padding-left: 1rem;
+          color: #d9e5f7;
+          font-size: 0.93rem;
+        }
+
+        .decision-insight-card li + li {
+          margin-top: 0.45rem;
+        }
+
+        .st-key-decision_hub_alerts div.stButton {
+          display: flex;
+          justify-content: flex-end;
+        }
+
+        .st-key-decision_hub_alerts div.stButton > button {
+          width: auto !important;
+          min-width: 164px;
+          min-height: 50px;
+          padding: 0 1.2rem !important;
+          border: 1.5px solid transparent !important;
+          border-radius: 17px !important;
+          color: #f5fbff !important;
+          font-weight: 800 !important;
+          background:
+            linear-gradient(180deg, rgba(5, 12, 24, 0.98), rgba(8, 18, 31, 0.96)) padding-box,
+            linear-gradient(90deg, rgba(123, 78, 255, 0.98) 0%, rgba(79, 123, 255, 0.94) 54%, rgba(17, 225, 245, 0.98) 100%) border-box !important;
+          box-shadow:
+            0 14px 34px rgba(7, 15, 28, 0.34),
+            0 0 0 1px rgba(151, 191, 255, 0.04) inset,
+            0 0 22px rgba(74, 110, 255, 0.16) !important;
+          transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease !important;
+        }
+
+        .st-key-decision_hub_alerts div.stButton > button:hover {
+          transform: translateY(-1px);
+          box-shadow:
+            0 16px 38px rgba(7, 15, 28, 0.38),
+            0 0 0 1px rgba(173, 198, 255, 0.08) inset,
+            0 0 28px rgba(74, 110, 255, 0.22) !important;
+          filter: brightness(1.03);
+        }
+
+        .st-key-decision_hub_alerts .stCaptionContainer {
+          padding-top: 0.2rem;
+        }
+
+        @keyframes decisionPulse {
+          0% { box-shadow: 0 0 0 0 rgba(39, 211, 123, 0.36); }
+          70% { box-shadow: 0 0 0 10px rgba(39, 211, 123, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(39, 211, 123, 0); }
+        }
+
+        @media (max-width: 1100px) {
+          .decision-hub-metric-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 760px) {
+          .decision-hub-header,
+          .st-key-decision_hub_alerts .stHorizontalBlock {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .decision-hub-metric-grid {
+            grid-template-columns: minmax(0, 1fr);
+          }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="page-shell">
+          <div class="decision-hub-header">
+            <div>
+              <h1>Decision Hub</h1>
+              <p>AI-powered project intelligence overview</p>
+            </div>
+            <div class="decision-status-chip">
+              <span class="decision-status-dot"></span>
+              <span>AI Monitoring Active</span>
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    st.markdown(
+        f"""
+        <div class="page-shell">
+          <div class="decision-hub-metric-grid">
+            <div class="decision-hub-metric-card">
+              <span>Expected Completion</span>
+              <strong>{expected_completion}</strong>
+              <small>P50 percentile</small>
+            </div>
+            <div class="decision-hub-metric-card">
+              <span>Critical Path</span>
+              <strong>{payload['critical_path_days']:.0f} days</strong>
+              <small>{len(payload['critical_path'])} tasks on the path</small>
+            </div>
+            <div class="decision-hub-metric-card">
+              <span>Delay Probability</span>
+              <strong>{delay_probability_pct:.0f}%</strong>
+              <small>Monte Carlo forecast exposure</small>
+            </div>
+            <div class="decision-hub-metric-card">
+              <span>Budget Risk</span>
+              <strong>{budget_risk}</strong>
+              <small>{budget_overrun:.1f}% average budget variance</small>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-def _render_task_architect() -> None:
-    _render_command_bar()
-    payload = _current_payload()
+    with st.container(key="decision_hub_health"):
+        st.markdown(
+            f"""
+            <div class="decision-health-card">
+              <span>Project Health Score</span>
+              <strong>{health_score:.0f} / 100</strong>
+              <p>Based on schedule risk, portfolio drift, and resource stability.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    chart_config = {"displayModeBar": False, "responsive": True}
+    chart_col, gauge_col = st.columns([1.9, 1.0], gap="large")
+    with chart_col:
+        with st.container(key="decision_hub_main_chart"):
+            st.markdown(
+                """
+                <div class="decision-panel-label">Forecast Trend</div>
+                <h3 class="decision-panel-title">Confidence Over Time</h3>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(
+                _decision_hub_confidence_chart(_decision_hub_confidence_series(payload["completion"])),
+                use_container_width=True,
+                config=chart_config,
+            )
+    with gauge_col:
+        with st.container(key="decision_hub_gauge_success"):
+            st.markdown(
+                """
+                <div class="decision-panel-label">Confidence</div>
+                <h3 class="decision-panel-title">Success Confidence</h3>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(
+                _decision_hub_gauge_figure(confidence_score, "#5b6cff"),
+                use_container_width=True,
+                config=chart_config,
+            )
+        with st.container(key="decision_hub_gauge_delay"):
+            st.markdown(
+                """
+                <div class="decision-panel-label">Risk</div>
+                <h3 class="decision-panel-title">Delay Probability</h3>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(
+                _decision_hub_gauge_figure(delay_probability_pct, "#22c7dd"),
+                use_container_width=True,
+                config=chart_config,
+            )
+
+    with st.container(key="decision_hub_alerts"):
+        toolbar_col, action_col = st.columns([0.78, 0.22], gap="small")
+        with toolbar_col:
+            st.caption("Signals")
+            st.markdown("### Predictive Alerts")
+        with action_col:
+            analysis_clicked = st.button(
+                "Run AI Analysis",
+                key="decision_hub_run_analysis",
+                type="primary",
+                use_container_width=True,
+            )
+        if analysis_clicked:
+            with st.spinner("Analyzing live project signals..."):
+                time.sleep(0.9)
+            st.session_state.decision_hub_last_analysis = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
+            st.rerun()
+        if st.session_state.get("decision_hub_last_analysis"):
+            st.caption(f"Last analysis refresh: {st.session_state.decision_hub_last_analysis}")
+
+        alert_symbols = {"critical": "●", "warning": "●", "info": "●"}
+        for index, alert in enumerate(alerts):
+            with st.container(key=f"decision_alert_{alert['type']}_{index}"):
+                marker_col, message_col = st.columns([0.06, 0.94], gap="small")
+                with marker_col:
+                    st.markdown(alert_symbols.get(alert["type"], "●"))
+                with message_col:
+                    st.markdown(alert["msg"])
+
     st.markdown(
         """
         <div class="page-shell">
+          <h3 class="decision-insights-title">AI Insights</h3>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    insight_cols = st.columns(3, gap="large")
+    insight_keys = [
+        "decision_hub_insight_critical",
+        "decision_hub_insight_resources",
+        "decision_hub_insight_schedule",
+    ]
+    for column, card, container_key in zip(insight_cols, insight_cards, insight_keys, strict=False):
+        with column:
+            with st.container(key=container_key):
+                points_markup = "".join(f"<li>{html.escape(point)}</li>" for point in card["points"])
+                st.markdown(
+                    f"""
+                    <div class="decision-insight-card">
+                      <span>AI Insight</span>
+                      <h4>{html.escape(card['title'])}</h4>
+                      <ul>{points_markup}</ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+
+def _risk_intelligence_payload() -> dict[str, Any]:
+    payload = st.session_state.get("task_architect_payload")
+    if isinstance(payload, dict) and payload.get("tasks"):
+        return payload
+    return _current_payload()
+
+
+def _risk_short_task_label(name: str) -> str:
+    words = [word for word in re.split(r"[^A-Za-z0-9]+", str(name)) if word]
+    filtered = [
+        word for word in words if word.lower() not in {"and", "the", "for", "of", "to", "with", "a", "an"}
+    ] or words
+    if not filtered:
+        return "Task"
+    if len(filtered) == 1:
+        return filtered[0][:12]
+    short = " ".join(filtered[:2])
+    if len(short) <= 14:
+        return short
+    acronym = "".join(word[0].upper() for word in filtered[:3])
+    return acronym or short[:12]
+
+
+def _risk_driver_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    tasks = payload.get("tasks") or []
+    task_map = {str(task.get("id")): task for task in tasks if isinstance(task, dict) and task.get("id")}
+    rows: list[dict[str, Any]] = []
+
+    drivers = payload.get("drivers") or []
+    if isinstance(drivers, list) and drivers:
+        for item in drivers:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("task_id", ""))
+            task = task_map.get(task_id, {})
+            frequency_pct = float(item.get("critical_path_frequency_pct", 0.0))
+            risk_factor_pct = float(task.get("risk_factor", item.get("risk_factor", 0.0))) * 100.0
+            score = round(min(100.0, (frequency_pct * 0.68) + (risk_factor_pct * 0.32)), 1)
+            rows.append(
+                {
+                    "task_id": task_id or task.get("id", ""),
+                    "task_name": str(item.get("task_name") or task.get("name") or "Unknown task"),
+                    "critical_path_frequency_pct": frequency_pct,
+                    "risk_factor_pct": round(risk_factor_pct, 1),
+                    "score": score,
+                    "mean_duration": float(task.get("mean_duration", 0.0)),
+                    "std_dev": float(task.get("std_dev", 0.0)),
+                }
+            )
+
+    if not rows:
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            risk_factor_pct = float(task.get("risk_factor", 0.0)) * 100.0
+            rows.append(
+                {
+                    "task_id": str(task.get("id", "")),
+                    "task_name": str(task.get("name", "Unknown task")),
+                    "critical_path_frequency_pct": 0.0,
+                    "risk_factor_pct": round(risk_factor_pct, 1),
+                    "score": round(risk_factor_pct, 1),
+                    "mean_duration": float(task.get("mean_duration", 0.0)),
+                    "std_dev": float(task.get("std_dev", 0.0)),
+                }
+            )
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            float(row.get("score", 0.0)),
+            float(row.get("critical_path_frequency_pct", 0.0)),
+            float(row.get("risk_factor_pct", 0.0)),
+        ),
+        reverse=True,
+    )
+
+
+def _risk_driver_ranking_figure(driver_rows: list[dict[str, Any]]) -> go.Figure:
+    if not driver_rows:
+        return go.Figure()
+
+    chart_rows = list(reversed(driver_rows[:6]))
+    colors = ["#1fd6dd", "#31bbe8", "#488df4", "#6d6fff", "#9358ff", "#b84cff"]
+
+    figure = go.Figure(
+        go.Bar(
+            x=[row["score"] for row in chart_rows],
+            y=[row["task_name"] for row in chart_rows],
+            orientation="h",
+            marker=dict(color=colors[: len(chart_rows)], line=dict(width=0)),
+            customdata=[
+                [row["critical_path_frequency_pct"], row["risk_factor_pct"], row["mean_duration"]]
+                for row in chart_rows
+            ],
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Composite risk: %{x:.1f}<br>"
+                "Critical-path frequency: %{customdata[0]:.1f}%<br>"
+                "Risk factor: %{customdata[1]:.1f}%<br>"
+                "Mean duration: %{customdata[2]:.1f} days<extra></extra>"
+            ),
+        )
+    )
+    max_score = max(float(row["score"]) for row in chart_rows)
+    figure.update_layout(
+        height=310,
+        margin=dict(l=18, r=20, t=10, b=18),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(5,12,24,0.54)",
+        font=dict(color="#dfe9f7", family="Manrope, sans-serif"),
+        showlegend=False,
+        bargap=0.22,
+    )
+    figure.update_xaxes(
+        range=[0, max(100.0, max_score + 12.0)],
+        showgrid=True,
+        gridcolor="rgba(156, 176, 204, 0.10)",
+        zeroline=False,
+        color="#7f90ac",
+        title_text="",
+    )
+    figure.update_yaxes(showgrid=False, color="#7f90ac", title_text="")
+    return figure
+
+
+def _critical_path_frequency_figure(driver_rows: list[dict[str, Any]]) -> go.Figure:
+    if not driver_rows:
+        return go.Figure()
+
+    chart_rows = driver_rows[:5]
+    colors = ["#b84cff", "#a859ff", "#7a6cff", "#4c93ff", "#23d1dd"]
+    figure = go.Figure(
+        go.Bar(
+            x=[_risk_short_task_label(row["task_name"]) for row in chart_rows],
+            y=[row["critical_path_frequency_pct"] for row in chart_rows],
+            marker=dict(color=colors[: len(chart_rows)], line=dict(width=0)),
+            hovertemplate="<b>%{x}</b><br>Critical-path frequency: %{y:.1f}%<extra></extra>",
+        )
+    )
+    figure.update_layout(
+        height=310,
+        margin=dict(l=18, r=16, t=10, b=18),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(5,12,24,0.54)",
+        font=dict(color="#dfe9f7", family="Manrope, sans-serif"),
+        showlegend=False,
+        bargap=0.2,
+        barcornerradius=12,
+    )
+    figure.update_xaxes(showgrid=False, color="#7f90ac", title_text="")
+    figure.update_yaxes(
+        range=[0, 100],
+        dtick=25,
+        ticksuffix="%",
+        showgrid=True,
+        gridcolor="rgba(156, 176, 204, 0.10)",
+        zeroline=False,
+        color="#7f90ac",
+        title_text="",
+    )
+    return figure
+
+
+def _task_bottleneck_network_figure(payload: dict[str, Any], driver_rows: list[dict[str, Any]]) -> go.Figure:
+    graph = payload.get("graph")
+    if not isinstance(graph, nx.DiGraph) or graph.number_of_nodes() == 0:
+        return go.Figure()
+
+    levels: dict[str, int] = {}
+    for node in nx.topological_sort(graph):
+        predecessors = list(graph.predecessors(node))
+        levels[node] = 0 if not predecessors else max(levels[pred] for pred in predecessors) + 1
+
+    level_groups: dict[int, list[str]] = {}
+    for node, level in levels.items():
+        level_groups.setdefault(level, []).append(node)
+
+    positions: dict[str, tuple[float, float]] = {}
+    max_level = max(level_groups) if level_groups else 0
+    for level, nodes in level_groups.items():
+        total = len(nodes)
+        if total == 1:
+            y_positions = [0.0]
+        else:
+            step = 1.6 / max(total - 1, 1)
+            y_positions = [0.8 - (index * step) for index in range(total)]
+        x_position = -1.0 + ((2.0 * level) / max(max_level, 1))
+        for node, y_position in zip(nodes, y_positions, strict=False):
+            positions[node] = (x_position, y_position)
+
+    critical_path = payload.get("critical_path") or []
+    critical_edges = set(zip(critical_path, critical_path[1:], strict=False))
+    driver_lookup = {row["task_id"]: row for row in driver_rows}
+
+    normal_edge_x: list[float | None] = []
+    normal_edge_y: list[float | None] = []
+    critical_edge_x: list[float | None] = []
+    critical_edge_y: list[float | None] = []
+
+    for source, target in graph.edges():
+        x0, y0 = positions[source]
+        x1, y1 = positions[target]
+        bucket_x = critical_edge_x if (source, target) in critical_edges else normal_edge_x
+        bucket_y = critical_edge_y if (source, target) in critical_edges else normal_edge_y
+        bucket_x.extend([x0, x1, None])
+        bucket_y.extend([y0, y1, None])
+
+    node_x = [positions[node][0] for node in graph.nodes()]
+    node_y = [positions[node][1] for node in graph.nodes()]
+    node_sizes: list[float] = []
+    node_colors: list[str] = []
+    node_line_colors: list[str] = []
+    node_labels: list[str] = []
+    hover_rows: list[list[Any]] = []
+
+    for node in graph.nodes():
+        task_name = str(graph.nodes[node].get("name", node))
+        task_duration = float(graph.nodes[node].get("mean_duration", 0.0))
+        risk_factor = float(graph.nodes[node].get("risk_factor", 0.0)) * 100.0
+        frequency_pct = float(driver_lookup.get(node, {}).get("critical_path_frequency_pct", 0.0))
+        node_sizes.append(26 + (risk_factor * 0.18) + (frequency_pct * 0.10))
+        if node in critical_path:
+            node_colors.append("rgba(157, 77, 255, 0.72)")
+            node_line_colors.append("#ff4f97")
+        else:
+            node_colors.append("rgba(24, 138, 255, 0.40)")
+            node_line_colors.append("#24d4ff")
+        node_labels.append(_risk_short_task_label(task_name))
+        hover_rows.append([task_name, risk_factor, frequency_pct, task_duration])
+
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=normal_edge_x,
+            y=normal_edge_y,
+            mode="lines",
+            line=dict(color="rgba(138, 154, 180, 0.20)", width=1.4, dash="dot"),
+            hoverinfo="none",
+            showlegend=False,
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=critical_edge_x,
+            y=critical_edge_y,
+            mode="lines",
+            line=dict(color="rgba(187, 203, 226, 0.76)", width=2.6),
+            hoverinfo="none",
+            showlegend=False,
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=node_x,
+            y=node_y,
+            mode="markers",
+            marker=dict(size=[size * 1.35 for size in node_sizes], color="rgba(135, 86, 255, 0.14)", line=dict(width=0)),
+            hoverinfo="none",
+            showlegend=False,
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=node_x,
+            y=node_y,
+            mode="markers+text",
+            text=node_labels,
+            textposition="middle center",
+            textfont=dict(color="#eef5ff", size=11, family="Sora, sans-serif"),
+            marker=dict(size=node_sizes, color=node_colors, line=dict(color=node_line_colors, width=1.8)),
+            customdata=hover_rows,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Risk factor: %{customdata[1]:.1f}%<br>"
+                "Critical-path frequency: %{customdata[2]:.1f}%<br>"
+                "Mean duration: %{customdata[3]:.1f} days<extra></extra>"
+            ),
+            showlegend=False,
+        )
+    )
+    figure.update_layout(
+        height=360,
+        margin=dict(l=8, r=8, t=8, b=6),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        font=dict(color="#dfe9f7", family="Manrope, sans-serif"),
+    )
+    return figure
+
+
+def _risk_reasoning_items(payload: dict[str, Any], driver_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    graph = payload.get("graph")
+    tasks = payload.get("tasks") or []
+    if not isinstance(graph, nx.DiGraph) or not tasks:
+        return [
+            {
+                "title": "Risk drivers will appear after a plan is generated",
+                "body": "Generate a task structure from AI Task Architect to see the leading bottlenecks, critical-path pressure, and mitigation guidance.",
+            }
+        ]
+
+    task_map = {str(task.get("id")): task for task in tasks if isinstance(task, dict) and task.get("id")}
+    reasoning: list[dict[str, str]] = []
+    used_ids: set[str] = set()
+
+    if driver_rows:
+        top_row = driver_rows[0]
+        top_id = str(top_row.get("task_id", ""))
+        top_task = task_map.get(top_id, {})
+        mean_duration = float(top_task.get("mean_duration", top_row.get("mean_duration", 0.0)))
+        std_dev = float(top_task.get("std_dev", top_row.get("std_dev", 0.0)))
+        variance_pct = (std_dev / mean_duration * 100.0) if mean_duration else 0.0
+        downstream_tasks = len(nx.descendants(graph, top_id)) if top_id and graph.has_node(top_id) else 0
+        reasoning.append(
+            {
+                "title": f"{top_row['task_name']} is the primary risk driver",
+                "body": (
+                    f"This task appears on the critical path in {top_row['critical_path_frequency_pct']:.0f}% of simulations. "
+                    f"It fans into {downstream_tasks} downstream tasks and carries duration variance of {variance_pct:.0f}%."
+                ),
+            }
+        )
+        used_ids.add(top_id)
+
+    connectivity_candidates: list[tuple[str, int, int]] = []
+    for node in graph.nodes():
+        if str(node) in used_ids:
+            continue
+        downstream_tasks = len(nx.descendants(graph, node))
+        connectivity = int(graph.in_degree(node) + graph.out_degree(node))
+        connectivity_candidates.append((str(node), connectivity, downstream_tasks))
+    connectivity_candidates.sort(key=lambda item: (item[1], item[2]), reverse=True)
+    if connectivity_candidates:
+        node_id, _, downstream_tasks = connectivity_candidates[0]
+        task = task_map.get(node_id, {})
+        reasoning.append(
+            {
+                "title": f"{task.get('name', node_id)} creates the widest coordination bottleneck",
+                "body": (
+                    f"It connects {graph.in_degree(node_id)} upstream and {graph.out_degree(node_id)} downstream dependencies, "
+                    f"so slippage here can cascade into {downstream_tasks} later tasks."
+                ),
+            }
+        )
+        used_ids.add(node_id)
+
+    variance_candidates: list[tuple[str, float]] = []
+    for task in tasks:
+        task_id = str(task.get("id", ""))
+        if task_id in used_ids:
+            continue
+        mean_duration = float(task.get("mean_duration", 0.0))
+        std_dev = float(task.get("std_dev", 0.0))
+        variance_pct = (std_dev / mean_duration * 100.0) if mean_duration else 0.0
+        variance_candidates.append((task_id, variance_pct))
+    variance_candidates.sort(key=lambda item: item[1], reverse=True)
+    if variance_candidates:
+        task_id, variance_pct = variance_candidates[0]
+        task = task_map.get(task_id, {})
+        reasoning.append(
+            {
+                "title": f"{task.get('name', task_id)} carries the widest duration uncertainty",
+                "body": (
+                    f"This step is estimated at {float(task.get('mean_duration', 0.0)):.1f} days with ±{float(task.get('std_dev', 0.0)):.1f} days "
+                    f"of variability ({variance_pct:.0f}% spread), making it a major contributor to the P80 commitment."
+                ),
+            }
+        )
+
+    return reasoning[:3]
+
+
+def _risk_prediction_items(payload: dict[str, Any], driver_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    tasks = payload.get("tasks") or []
+    task_map = {str(task.get("id")): task for task in tasks if isinstance(task, dict) and task.get("id")}
+    baseline_row = None
+    boosted_row = None
+    scenarios_df = payload.get("scenarios_df")
+    if isinstance(scenarios_df, pd.DataFrame) and not scenarios_df.empty:
+        baseline_match = scenarios_df[scenarios_df["Scenario"] == "Baseline"]
+        boosted_match = scenarios_df[scenarios_df["Scenario"].str.contains("Increased Capacity", case=False, na=False)]
+        baseline_row = baseline_match.iloc[0] if not baseline_match.empty else None
+        boosted_row = boosted_match.iloc[0] if not boosted_match.empty else None
+
+    if driver_rows:
+        top_row = driver_rows[0]
+        top_task = task_map.get(str(top_row.get("task_id", "")), {})
+        emerging_body = (
+            f"{top_row['task_name']} currently carries the highest combined risk score and shows up on the critical path in "
+            f"{top_row['critical_path_frequency_pct']:.0f}% of simulations. "
+            f"Its modeled variability is ±{float(top_task.get('std_dev', top_row.get('std_dev', 0.0))):.1f} days."
+        )
+        emerging_title = f"Emerging Risk: {top_row['task_name']}"
+    else:
+        emerging_title = "Emerging Risk"
+        emerging_body = "Generate a project plan to see which tasks rise to the top of the risk stack."
+
+    if baseline_row is not None and boosted_row is not None:
+        mitigation_body = (
+            f"If you implement the modeled capacity intervention, overall delay probability drops from "
+            f"{float(baseline_row['Delay Prob (%)']):.1f}% to {float(boosted_row['Delay Prob (%)']):.1f}%, "
+            f"and the P80 commitment improves from {float(baseline_row['P80 (days)']):.1f} to {float(boosted_row['P80 (days)']):.1f} days."
+        )
+    else:
+        metrics = payload.get("metrics") or {}
+        mitigation_body = (
+            f"Current forecast confidence sits around P80 {float(metrics.get('p80', 0.0)):.1f} days. "
+            "Run scenario analysis after generating a plan to compare mitigation options."
+        )
+
+    return [
+        {"title": emerging_title, "body": emerging_body},
+        {"title": "Mitigation Impact Forecast", "body": mitigation_body},
+    ]
+
+
+def _render_risk_intelligence() -> None:
+    _render_command_bar()
+    payload = _risk_intelligence_payload()
+    driver_rows = _risk_driver_rows(payload)
+    reasoning_items = _risk_reasoning_items(payload, driver_rows)
+    prediction_items = _risk_prediction_items(payload, driver_rows)
+    chart_config = {"displayModeBar": False, "responsive": True}
+
+    st.markdown(
+        """
+        <style>
+        .risk-intel-header {
+          margin: 0 0 1.45rem;
+        }
+
+        .risk-intel-header h1 {
+          margin: 0;
+          font-family: Sora, sans-serif;
+          font-size: clamp(2rem, 2.8vw, 2.7rem);
+          line-height: 1.02;
+          color: #f4f8ff;
+        }
+
+        .risk-intel-header p {
+          margin: 0.45rem 0 0;
+          color: #92a4bf;
+          font-size: 0.98rem;
+        }
+
+        .st-key-risk_intel_driver_card,
+        .st-key-risk_intel_frequency_card,
+        .st-key-risk_intel_network_card,
+        .st-key-risk_intel_reasoning_card,
+        .st-key-risk_prediction_0,
+        .st-key-risk_prediction_1 {
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 22px;
+          padding: 1.18rem 1.25rem;
+          background:
+            linear-gradient(180deg, rgba(9, 18, 31, 0.95), rgba(7, 13, 24, 0.92)) padding-box,
+            linear-gradient(135deg, rgba(155, 92, 255, 0.14), rgba(100, 162, 255, 0.14), rgba(24, 209, 199, 0.12)) border-box;
+          box-shadow: var(--shadow);
+        }
+
+        .st-key-risk_intel_network_card,
+        .st-key-risk_intel_reasoning_card,
+        .st-key-risk_prediction_0,
+        .st-key-risk_prediction_1 {
+          margin-top: 1rem;
+        }
+
+        .risk-intel-card-kicker,
+        .risk-intel-section-kicker {
+          color: #95a7c4;
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
+          font-weight: 700;
+        }
+
+        .risk-intel-section-heading {
+          margin: 1rem 0 0;
+          padding-left: 1.25rem;
+        }
+
+        .risk-intel-card-title {
+          margin: 0.3rem 0 0.1rem;
+          font-family: Sora, sans-serif;
+          font-size: 1.08rem;
+          color: #f4f8ff;
+        }
+
+        .risk-intel-reasoning-item {
+          padding: 0.95rem 1rem;
+          border-radius: 16px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .risk-intel-reasoning-item + .risk-intel-reasoning-item {
+          margin-top: 0.85rem;
+        }
+
+        .risk-intel-reasoning-item strong {
+          display: block;
+          margin: 0 0 0.45rem;
+          color: #f4f8ff;
+          font-size: 0.98rem;
+          font-family: Sora, sans-serif;
+        }
+
+        .risk-intel-reasoning-item p,
+        .risk-intel-prediction-body {
+          margin: 0;
+          color: #9db0ca;
+          line-height: 1.72;
+          font-size: 0.95rem;
+        }
+
+        .risk-intel-prediction-head {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          color: #95a7c4;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          font-size: 0.78rem;
+          font-weight: 700;
+        }
+
+        .risk-intel-prediction-dot {
+          width: 9px;
+          height: 9px;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #9b5cff 0%, #18d1c7 100%);
+          box-shadow: 0 0 16px rgba(91, 108, 255, 0.28);
+          flex: 0 0 auto;
+        }
+
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="page-shell">
+          <div class="risk-intel-header">
+            <h1>Risk Intelligence</h1>
+            <p>Explainable AI insights into project risks</p>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    ranking_col, frequency_col = st.columns(2, gap="large")
+    with ranking_col:
+        with st.container(key="risk_intel_driver_card"):
+            st.markdown(
+                """
+                <div class="risk-intel-card-kicker">Risk Driver Ranking</div>
+                <h3 class="risk-intel-card-title">Tasks with the highest modeled pressure</h3>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(_risk_driver_ranking_figure(driver_rows), use_container_width=True, config=chart_config)
+    with frequency_col:
+        with st.container(key="risk_intel_frequency_card"):
+            st.markdown(
+                """
+                <div class="risk-intel-card-kicker">Critical Path Frequency</div>
+                <h3 class="risk-intel-card-title">Which tasks dominate the delivery path</h3>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(_critical_path_frequency_figure(driver_rows), use_container_width=True, config=chart_config)
+
+    with st.container(key="risk_intel_network_card"):
+        st.markdown(
+            """
+            <div class="risk-intel-card-kicker">Task Bottleneck Network</div>
+            <h3 class="risk-intel-card-title">How risk propagates through dependencies</h3>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(_task_bottleneck_network_figure(payload, driver_rows), use_container_width=True, config=chart_config)
+
+    with st.container(key="risk_intel_reasoning_card"):
+        st.markdown(
+            """
+            <div class="risk-intel-card-kicker">AI Reasoning — Why Delays May Occur</div>
+            <h3 class="risk-intel-card-title">What the model sees in the generated plan</h3>
+            """,
+            unsafe_allow_html=True,
+        )
+        for item in reasoning_items:
+            st.markdown(
+                f"""
+                <div class="risk-intel-reasoning-item">
+                  <strong>{html.escape(item['title'])}</strong>
+                  <p>{html.escape(item['body'])}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown(
+        """
+        <div class="risk-intel-section-heading">
+          <div class="risk-intel-section-kicker">AI Risk Predictions</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for index, item in enumerate(prediction_items):
+        with st.container(key=f"risk_prediction_{index}"):
+            st.markdown(
+                f"""
+                <div class="risk-intel-prediction-head">
+                  <span class="risk-intel-prediction-dot" aria-hidden="true"></span>
+                  <span>{html.escape(item['title'].upper())}</span>
+                </div>
+                <p class="risk-intel-prediction-body">{html.escape(item['body'])}</p>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def _render_structured_workspace(kicker: str) -> None:
+    _render_command_bar()
+    payload = _current_payload()
+    st.markdown(
+        f"""
+        <div class="page-shell">
           <div class="glass dashboard-banner">
-            <span class="kicker">AI Task Architect</span>
+            <span class="kicker">{kicker}</span>
             <h1 class="page-title">Inspect the generated work structure and dependency graph.</h1>
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    _render_structured_workspace_content(payload)
+
+
+def _render_structured_workspace_content(
+    payload: dict[str, Any],
+    *,
+    notes_title: str = "Architect notes",
+    notes_copy: str | None = None,
+) -> None:
     graph_col, task_col = st.columns([1.0, 1.0], gap="large")
     with graph_col:
         st.plotly_chart(_theme_chart(dependency_graph_figure(payload["graph"], payload["critical_path"])), use_container_width=True)
     with task_col:
         tasks_df = pd.DataFrame(payload["tasks"])
         st.dataframe(tasks_df, use_container_width=True, hide_index=True)
+        default_copy = (
+            f"{len(payload['tasks'])} tasks were generated for this workspace. "
+            f"The baseline critical path spans {payload['critical_path_days']:.1f} days."
+        )
         st.markdown(
             f"""
             <div class="history-card">
-              <strong style="font-family:Sora,sans-serif;">Architect notes</strong>
-              <p>{len(payload['tasks'])} tasks were generated for this workspace. The baseline critical path spans {payload['critical_path_days']:.1f} days.</p>
+              <strong style="font-family:Sora,sans-serif;">{notes_title}</strong>
+              <p>{notes_copy or default_copy}</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
 
-def _render_risk_intelligence() -> None:
-    _render_command_bar()
-    payload = _current_payload()
-    portfolio_df = payload["portfolio_df"].copy()
-    monitoring_df = payload["monitoring_df"].copy()
-    model_metrics = payload["model_metrics"]
-
-    portfolio_df["ProbabilityProxy"] = (
-        portfolio_df["Weather_Risk_Index"] + portfolio_df["Procurement_Risk_Index"]
-    ) / 2
-    heatmap = px.scatter(
-        portfolio_df,
-        x="ProbabilityProxy",
-        y="Budget_Overrun_Pct",
-        color="Outcome_Risk_Level",
-        size="Complexity_Score",
-        hover_name="Project_ID",
-        title="Risk heat map: portfolio projects",
-        labels={"ProbabilityProxy": "Probability proxy", "Budget_Overrun_Pct": "Impact proxy (%)"},
-        color_discrete_map={"High": "#ff7f8c", "Medium": "#f5c56b", "Low": "#18d1c7"},
-    )
-
-    monitoring_df["Snapshot_Month"] = pd.to_datetime(monitoring_df["Snapshot_Month"])
-    drift_df = monitoring_df.groupby("Snapshot_Month", as_index=False).agg(
-        avg_drift=("Drift_Score", "mean"),
-        accuracy=("Predicted_Risk_Level", lambda s: 0),  # placeholder to merge below
-    )
-    accuracy_df = (
-        monitoring_df.assign(match=monitoring_df["Predicted_Risk_Level"] == monitoring_df["Actual_Risk_Level"])
-        .groupby("Snapshot_Month", as_index=False)["match"]
-        .mean()
-    )
-    drift_df = drift_df.drop(columns=["accuracy"]).merge(accuracy_df, on="Snapshot_Month", how="left")
-    drift_line = go.Figure()
-    drift_line.add_trace(
-        go.Scatter(
-            x=drift_df["Snapshot_Month"],
-            y=drift_df["avg_drift"],
-            mode="lines+markers",
-            name="Avg drift",
-            line=dict(color="#ff7f8c", width=3),
-        )
-    )
-    drift_line.add_trace(
-        go.Scatter(
-            x=drift_df["Snapshot_Month"],
-            y=drift_df["match"] * 100.0,
-            mode="lines+markers",
-            name="Accuracy %",
-            line=dict(color="#18d1c7", width=3),
-            yaxis="y2",
-        )
-    )
-    drift_line.update_layout(
-        title="Risk monitoring trend",
-        yaxis_title="Drift score",
-        yaxis2=dict(title="Accuracy %", overlaying="y", side="right"),
-    )
-
-    high_risk_rows = pd.DataFrame()
-    if not payload["ml_predictions_df"].empty:
-        high_risk_rows = payload["ml_predictions_df"].copy()
-        high_cols = [col for col in high_risk_rows.columns if "Probability_High" in col]
-        if high_cols:
-            high_risk_rows = high_risk_rows.sort_values(high_cols[0], ascending=False).head(5)
-
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Monitoring Accuracy", f"{payload['monitoring_summary']['accuracy_pct']:.1f}%")
-    metric_cols[1].metric("Average Drift", f"{payload['monitoring_summary']['avg_drift']:.3f}")
-    metric_cols[2].metric("Active Alerts", f"{int(payload['monitoring_summary']['alerts_open'])}")
-    metric_cols[3].metric("Model Selected", model_metrics.get("selected_model_name", "unknown"))
-
-    chart_cols = st.columns(2, gap="large")
-    with chart_cols[0]:
-        st.plotly_chart(_theme_chart(heatmap), use_container_width=True)
-    with chart_cols[1]:
-        st.plotly_chart(_theme_chart(drift_line), use_container_width=True)
-
-    if not high_risk_rows.empty:
-        st.dataframe(high_risk_rows, use_container_width=True, hide_index=True)
-
-    feature_importance = model_metrics.get("feature_importance", [])[:5]
-    bullets = "".join(
-        f"<li><strong>{item['feature']}</strong>: {float(item['importance']):.4f}</li>"
-        for item in feature_importance
-    )
+def _render_task_architect() -> None:
     st.markdown(
-        f"""
-        <div class="history-card">
-          <strong style="font-family:Sora,sans-serif;">Mitigation recommendations</strong>
-          <p>The current joblib-backed classifier highlights these leading explanatory signals:</p>
-          <ul>{bullets}</ul>
+        """
+        <style>
+        div[data-testid="stForm"] {
+          border: 1px solid transparent;
+          border-radius: 22px;
+          padding: 1.35rem 1.5rem 1.5rem;
+          background:
+            linear-gradient(180deg, rgba(10, 18, 30, 0.95), rgba(6, 11, 22, 0.92)) padding-box,
+            linear-gradient(135deg, rgba(102, 176, 255, 0.4), rgba(38, 214, 231, 0.22), rgba(155, 92, 255, 0.24)) border-box;
+          box-shadow: var(--shadow);
+        }
+
+        div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] {
+          margin-top: 0.35rem;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] button {
+          width: auto !important;
+          min-width: 178px;
+          padding-left: 1.2rem !important;
+          padding-right: 1.2rem !important;
+        }
+
+        div[data-testid="stForm"] [data-testid="stTextInputRootElement"],
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] > div,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] > div > div,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-baseweb="input"],
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-baseweb="input"] > div {
+          border: 1.5px solid transparent !important;
+          border-radius: 15px !important;
+          background-color: transparent !important;
+          background:
+            linear-gradient(180deg, rgba(7, 14, 28, 0.99), rgba(6, 12, 24, 0.97)) padding-box,
+            linear-gradient(90deg, rgba(123, 78, 255, 0.98) 0%, rgba(79, 123, 255, 0.94) 54%, rgba(17, 225, 245, 0.98) 100%) border-box !important;
+          box-shadow:
+            0 0 0 1px rgba(68, 157, 255, 0.08),
+            0 0 26px rgba(17, 225, 245, 0.08),
+            0 10px 24px rgba(0, 0, 0, 0.14) !important;
+        }
+
+        div[data-testid="stForm"] [data-testid="stTextInputRootElement"]:focus-within,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] > div:focus-within,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] > div > div:focus-within,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-baseweb="input"]:focus-within,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-baseweb="input"] > div:focus-within {
+          box-shadow:
+            0 0 0 1px rgba(17, 225, 245, 0.24),
+            0 0 26px rgba(79, 123, 255, 0.14) !important;
+        }
+
+        div[data-testid="stForm"] [data-testid="stTextInputRootElement"] input,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] input {
+          min-height: 50px !important;
+          color: #f4f8ff !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-baseweb="input"],
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-baseweb="input"] > div {
+<<<<<<< ours
+<<<<<<< ours
+          overflow: hidden !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button {
+          min-width: 29px !important;
+=======
+=======
+>>>>>>> theirs
+          flex: 1 1 auto !important;
+          min-width: 0 !important;
+          overflow: hidden !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-testid="stNumberInputContainer"] {
+          display: flex !important;
+          align-items: stretch !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-testid="stNumberInputContainer"] > div:first-child {
+          flex: 1 1 auto !important;
+          min-width: 0 !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] [data-testid="stNumberInputContainer"] > div:last-child {
+          display: flex !important;
+          flex-direction: row !important;
+          flex: 0 0 auto !important;
+          width: 64px !important;
+          min-width: 64px !important;
+          height: 50px !important;
+          align-self: stretch !important;
+          justify-content: stretch !important;
+          position: relative !important;
+          z-index: 2 !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          pointer-events: auto !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepDown"],
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepUp"] {
+          width: 32px !important;
+          min-width: 32px !important;
+          height: 50px !important;
+>>>>>>> theirs
+          min-height: 50px !important;
+          padding: 0 !important;
+          border: none !important;
+          border-left: 1px solid rgba(82, 215, 241, 0.22) !important;
+          border-radius: 0 !important;
+          background: transparent !important;
+          color: rgba(118, 204, 235, 0.9) !important;
+          box-shadow: none !important;
+        }
+
+<<<<<<< ours
+<<<<<<< ours
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button:hover {
+=======
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepDown"]:hover,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepUp"]:hover {
+>>>>>>> theirs
+=======
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepDown"]:hover,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepUp"]:hover {
+>>>>>>> theirs
+          background: rgba(83, 215, 241, 0.06) !important;
+          color: rgba(162, 232, 255, 0.96) !important;
+        }
+
+<<<<<<< ours
+<<<<<<< ours
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button svg {
+          fill: currentColor !important;
+=======
+=======
+>>>>>>> theirs
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepDown"] > *,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepUp"] > * {
+          width: 100% !important;
+          height: 100% !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          line-height: 1 !important;
+          transform: none !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepDown"] > * > *,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepUp"] > * > * {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          line-height: 1 !important;
+          transform: none !important;
+        }
+
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepDown"] svg,
+        div[data-testid="stForm"] div[data-testid="stNumberInput"] button[data-testid="stNumberInputStepUp"] svg {
+          display: block !important;
+          width: 14px !important;
+          height: 14px !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          line-height: 1 !important;
+          transform: none !important;
+          position: static !important;
+>>>>>>> theirs
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    _render_command_bar()
+
+    st.markdown(
+        """
+        <div class="page-shell task-architect-shell">
+          <div class="task-architect-hero">
+            <span class="task-architect-hero-kicker">AI Task Architect</span>
+            <h1 class="task-architect-hero-title">Inspect the generated work structure and dependency graph.</h1>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    uploaded_project_file, upload_generate_clicked = _render_upload_intake_section(
+        upload_key="task_architect_upload_file",
+        show_generate_button=True,
+        generate_button_key="task_architect_upload_generate",
+    )
 
+    submission_error: str | None = None
+    with st.form("task_architect_form", clear_on_submit=False):
+        st.markdown(
+            """
+            <div class="task-architect-panel-head">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10 5a3 3 0 1 0-6 0c0 1.6 1.1 2.8 2.4 3.4"></path>
+                <path d="M14 5a3 3 0 1 1 6 0c0 1.6-1.1 2.8-2.4 3.4"></path>
+                <path d="M7 13a3 3 0 1 0 0 6"></path>
+                <path d="M17 13a3 3 0 1 1 0 6"></path>
+                <path d="M7 8h10"></path>
+                <path d="M12 8v8"></path>
+              </svg>
+              <span>Project Parameters</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        goal_col, timeline_col, team_col = st.columns(3, gap="large")
+        with goal_col:
+            project_goal = st.text_input(
+                "Project Goal",
+                key="task_architect_goal",
+                placeholder="e.g., Build a customer portal",
+            )
+        with timeline_col:
+            timeline_text = st.number_input(
+                "Timeline (week)",
+                min_value=1,
+                max_value=104,
+                step=1,
+                key="task_architect_timeline",
+            )
+        with team_col:
+            team_size = st.number_input(
+                "Team Size",
+                min_value=1,
+                max_value=50,
+                step=1,
+                key="task_architect_team_size",
+            )
+        submitted = st.form_submit_button("Generate AI Plan")
+
+    if submitted:
+        submission_error = _run_task_architect_generation(project_goal, timeline_text, int(team_size))
+    elif upload_generate_clicked:
+        submission_error = _run_task_architect_upload_generation(uploaded_project_file)
+
+    if submission_error:
+        st.error(submission_error)
+
+    generated_payload = st.session_state.get("task_architect_payload")
+    if generated_payload:
+        meta = generated_payload.get("architect_meta", {})
+        goal_label = html.escape(meta.get("project_goal", "your project"))
+        timeline_label = html.escape(meta.get("timeline_text", ""))
+        team_size_value = int(meta.get("team_size", 0))
+        notes_copy = (
+            f"Generated an AI plan for <strong>{goal_label}</strong> with a target of "
+            f"{timeline_label} and a team of {team_size_value}. "
+            f"The baseline critical path spans {generated_payload['critical_path_days']:.1f} days."
+        )
+        _render_structured_workspace_content(
+            generated_payload,
+            notes_title="Generated plan",
+            notes_copy=notes_copy,
+        )
+    else:
+        st.markdown(
+            """
+            <div class="glass task-architect-empty">
+              <div class="task-architect-empty-inner">
+                <span class="task-architect-empty-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M9 7a3 3 0 0 1 6 0c1.8 0 3 1.3 3 3 0 1.3-.7 2.4-1.9 2.9"></path>
+                    <path d="M9 7c-1.8 0-3 1.3-3 3 0 1.3.7 2.4 1.9 2.9"></path>
+                    <path d="M8.5 12.9c0 1.8 1.2 3.1 3 3.1"></path>
+                    <path d="M15.5 12.9c0 1.8-1.2 3.1-3 3.1"></path>
+                    <path d="M12 16v3"></path>
+                    <path d="M10 21h4"></path>
+                  </svg>
+                </span>
+                <h2 class="task-architect-empty-title">Ready to Architect ?</h2>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 def _render_simulator() -> None:
     _render_command_bar()
@@ -5024,13 +11645,43 @@ def _render_simulator() -> None:
             linear-gradient(90deg, var(--purple-strong) 0%, var(--blue-strong) 52%, var(--teal) 100%) border-box !important;
           box-shadow: 0 0 0 1px rgba(117, 231, 255, 0.22) !important;
         }
+
+        div[data-testid="stSlider"] {
+          margin-bottom: 0.4rem;
+        }
+
+        div[data-testid="stSlider"] label,
+        div[data-testid="stSlider"] label p {
+          color: #f5fbff !important;
+          font-family: "Sora", sans-serif !important;
+          font-weight: 700 !important;
+          letter-spacing: -0.02em !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
+    _render_monte_carlo_explainer()
+    _render_monte_carlo_lens()
     payload = _current_payload()
-    variance = st.slider("Duration variance multiplier", min_value=0.5, max_value=3.0, value=1.0, step=0.1, key="sim_variance")
-    runs = st.slider("Number of simulations", min_value=1000, max_value=10000, value=min(3000, int(payload["iterations"])), step=500, key="sim_runs")
+    variance = st.slider(
+        "Schedule uncertainty level",
+        min_value=0.5,
+        max_value=3.0,
+        value=1.0,
+        step=0.1,
+        key="sim_variance",
+        help="Higher values widen task-duration variability and create a broader forecast range.",
+    )
+    runs = st.slider(
+        "Simulation runs",
+        min_value=1000,
+        max_value=10000,
+        value=min(3000, int(payload["iterations"])),
+        step=500,
+        key="sim_runs",
+        help="More runs create a smoother Monte Carlo distribution and more stable forecast metrics.",
+    )
     if st.button("Run AI Simulation", key="sim_run_button", type="primary", use_container_width=True):
         tasks = copy.deepcopy(payload["tasks"])
         for task in tasks:
@@ -5153,38 +11804,527 @@ def _render_summary() -> None:
     )
 
 
-def _render_upload() -> None:
-    _render_command_bar()
+def _uploaded_file_extension(file_name: str) -> str:
+    return Path(file_name).suffix.lower()
+
+
+def _extract_docx_preview(file_bytes: bytes) -> tuple[str, dict[str, Any]]:
+    document = DocxDocument(BytesIO(file_bytes))
+    paragraph_lines = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+    table_lines: list[str] = []
+    for table in document.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                table_lines.append(" | ".join(cells))
+    preview_lines = paragraph_lines + table_lines
+    preview_text = "\n".join(preview_lines).strip()
+    meta = {
+        "Paragraphs": len(paragraph_lines),
+        "Tables": len(document.tables),
+        "Characters": len(preview_text),
+    }
+    if not preview_text:
+        preview_text = "No readable text content was found in this Word document."
+    return preview_text, meta
+
+
+def _extract_pdf_preview(file_bytes: bytes) -> tuple[str, dict[str, Any]]:
+    reader = PdfReader(BytesIO(file_bytes))
+    extracted_pages: list[str] = []
+    for page in reader.pages:
+        page_text = (page.extract_text() or "").strip()
+        if page_text:
+            extracted_pages.append(page_text)
+    preview_text = "\n\n".join(extracted_pages).strip()
+    meta = {
+        "Pages": len(reader.pages),
+        "Extracted pages": len(extracted_pages),
+        "Characters": len(preview_text),
+    }
+    if not preview_text:
+        preview_text = "No readable text content was found in this PDF preview."
+    return preview_text, meta
+
+
+def _extract_spreadsheet_preview(file_name: str, file_bytes: bytes) -> tuple[pd.DataFrame, dict[str, Any]]:
+    extension = _uploaded_file_extension(file_name)
+    if extension == ".csv":
+        preview_df = pd.read_csv(BytesIO(file_bytes))
+        return preview_df, {"Rows": len(preview_df), "Columns": len(preview_df.columns), "Preview": "CSV"}
+
+    workbook = pd.ExcelFile(BytesIO(file_bytes), engine="openpyxl")
+    sheet_name = workbook.sheet_names[0]
+    preview_df = pd.read_excel(workbook, sheet_name=sheet_name, engine="openpyxl")
+    return preview_df, {
+        "Rows": len(preview_df),
+        "Columns": len(preview_df.columns),
+        "Sheets": len(workbook.sheet_names),
+        "Preview sheet": sheet_name,
+    }
+
+
+def _render_upload_meta(meta: dict[str, Any]) -> None:
+    if not meta:
+        return
+    columns = st.columns(len(meta))
+    for column, (label, value) in zip(columns, meta.items(), strict=False):
+        column.metric(label, str(value))
+
+
+def _render_uploaded_file_preview(file_name: str, file_bytes: bytes) -> None:
+    extension = _uploaded_file_extension(file_name)
+    try:
+        if extension in {".csv", ".xlsx"}:
+            preview_df, meta = _extract_spreadsheet_preview(file_name, file_bytes)
+            _render_upload_meta(meta)
+            st.dataframe(preview_df.head(20), use_container_width=True, hide_index=True)
+            if len(preview_df) > 20:
+                st.caption("Showing the first 20 rows from the uploaded spreadsheet.")
+            return
+
+        if extension == ".pdf":
+            preview_text, meta = _extract_pdf_preview(file_bytes)
+            _render_upload_meta(meta)
+            st.text_area("PDF preview", value=preview_text[:6000], height=320, disabled=True)
+            return
+
+        if extension == ".docx":
+            preview_text, meta = _extract_docx_preview(file_bytes)
+            _render_upload_meta(meta)
+            st.text_area("Word preview", value=preview_text[:6000], height=320, disabled=True)
+            return
+
+        st.warning("This file type is not yet supported in the preview workspace.")
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Unable to parse `{file_name}`: {exc}")
+
+
+def _clean_upload_line(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except TypeError:
+        pass
+    text = str(value).replace("\xa0", " ")
+    text = re.sub(r"[\t\r\n]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.strip(" -–—:;,.")
+
+
+def _normalize_upload_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _find_matching_column(columns: list[Any], keywords: list[str]) -> Any | None:
+    for column in columns:
+        normalized = str(column).lower().replace("_", " ").replace("-", " ")
+        if any(keyword in normalized for keyword in keywords):
+            return column
+    return None
+
+
+def _extract_dependency_tokens(value: Any) -> list[str]:
+    clean = _clean_upload_line(value)
+    if not clean or clean.lower() in {"none", "nan", "n/a", "na"}:
+        return []
+    parts = re.split(r"[,;/|\n]+|\band\b", clean, flags=re.IGNORECASE)
+    return [token for token in (_clean_upload_line(part) for part in parts) if token]
+
+
+def _parse_duration_days(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+
+    if isinstance(value, (int, float)):
+        numeric_value = float(value)
+        return numeric_value if numeric_value > 0 else None
+
+    clean = _clean_upload_line(value).lower()
+    if not clean:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)", clean)
+    if not match:
+        return None
+
+    numeric_value = float(match.group(1))
+    if "month" in clean:
+        return numeric_value * 20.0
+    if "week" in clean or "wk" in clean:
+        return numeric_value * 5.0
+    if "hour" in clean:
+        return max(1.0, numeric_value / 8.0)
+    return numeric_value if numeric_value > 0 else None
+
+
+def _fallback_upload_candidates(file_name: str) -> list[dict[str, Any]]:
+    stem = Path(file_name).stem.replace("_", " ").replace("-", " ").strip() or "uploaded project"
+    focus = re.sub(r"\s+", " ", stem)
+    return [
+        {"name": f"Review {focus}", "source_id": "1", "dependency_tokens": [], "duration_days": 4.0},
+        {"name": "Define delivery workstreams", "source_id": "2", "dependency_tokens": ["1"], "duration_days": 5.0},
+        {"name": "Design workflow architecture", "source_id": "3", "dependency_tokens": ["2"], "duration_days": 6.0},
+        {"name": "Build execution plan", "source_id": "4", "dependency_tokens": ["3"], "duration_days": 8.0},
+        {"name": "Validate launch readiness", "source_id": "5", "dependency_tokens": ["4"], "duration_days": 5.0},
+    ]
+
+
+def _estimate_upload_team_size(task_count: int, owner_count: int = 0) -> int:
+    if owner_count > 0:
+        return max(2, min(14, owner_count))
+    return max(3, min(12, round(max(task_count, 1) / 2.5) + 1))
+
+
+def _estimate_upload_timeline_weeks(task_count: int, dependency_count: int, duration_samples: list[float]) -> int:
+    if duration_samples:
+        total_days = sum(duration_samples[: min(12, len(duration_samples))])
+        heuristic_days = max(total_days * 0.42, max(duration_samples) * 2.2)
+    else:
+        heuristic_days = (task_count * 2.6) + (dependency_count * 0.55)
+    return max(3, int(round(max(15.0, heuristic_days) / 5.0)))
+
+
+def _derive_upload_project_goal(file_name: str, task_candidates: list[dict[str, Any]]) -> str:
+    stem = Path(file_name).stem.replace("_", " ").replace("-", " ").strip()
+    if stem:
+        return stem.title()
+    if task_candidates:
+        candidate = task_candidates[0]["name"]
+        return candidate if len(candidate) <= 48 else f"{candidate[:45].rstrip()}..."
+    return "Uploaded Project"
+
+
+def _extract_spreadsheet_task_context(file_name: str, file_bytes: bytes) -> dict[str, Any]:
+    preview_df, _meta = _extract_spreadsheet_preview(file_name, file_bytes)
+    working_df = preview_df.dropna(how="all").copy()
+    if working_df.empty:
+        fallback_candidates = _fallback_upload_candidates(file_name)
+        timeline_weeks = _estimate_upload_timeline_weeks(len(fallback_candidates), 4, [4.0, 5.0, 6.0])
+        return {
+            "project_goal": _derive_upload_project_goal(file_name, fallback_candidates),
+            "timeline_weeks": timeline_weeks,
+            "team_size": _estimate_upload_team_size(len(fallback_candidates)),
+            "task_candidates": fallback_candidates,
+            "detected_tasks": len(fallback_candidates),
+            "dependency_count": 4,
+        }
+
+    columns = list(working_df.columns)
+    name_column = _find_matching_column(
+        columns,
+        ["task name", "task", "activity", "work package", "deliverable", "milestone", "name", "summary"],
+    )
+    if name_column is None:
+        name_column = columns[0]
+
+    id_column = _find_matching_column(columns, ["task id", "activity id", "wbs", "id", "code"])
+    dependency_column = _find_matching_column(columns, ["dependency", "depends on", "predecessor", "blocked by", "after"])
+    duration_column = _find_matching_column(columns, ["duration", "estimate", "effort", "days", "weeks", "timeline", "eta"])
+    owner_column = _find_matching_column(columns, ["owner", "assignee", "resource", "team member", "lead"])
+
+    task_candidates: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    duration_samples: list[float] = []
+    dependency_count = 0
+    owner_names: set[str] = set()
+    detected_tasks = 0
+
+    for _, row in working_df.iterrows():
+        name = _clean_upload_line(row.get(name_column))
+        if not name or re.fullmatch(r"[\W\d_]+", name):
+            continue
+
+        detected_tasks += 1
+        dependency_tokens = _extract_dependency_tokens(row.get(dependency_column)) if dependency_column else []
+        dependency_count += len(dependency_tokens)
+        duration_days = _parse_duration_days(row.get(duration_column)) if duration_column else None
+        if duration_days is not None:
+            duration_samples.append(duration_days)
+
+        if owner_column:
+            owner_names.update(token for token in _extract_dependency_tokens(row.get(owner_column)) if token)
+
+        normalized_name = _normalize_upload_token(name)
+        if normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+
+        source_id = _clean_upload_line(row.get(id_column)) if id_column else str(detected_tasks)
+        task_candidates.append(
+            {
+                "name": name,
+                "source_id": source_id or str(detected_tasks),
+                "dependency_tokens": dependency_tokens,
+                "duration_days": duration_days,
+            }
+        )
+        if len(task_candidates) >= 8:
+            break
+
+    if not task_candidates:
+        task_candidates = _fallback_upload_candidates(file_name)
+
+    timeline_weeks = _estimate_upload_timeline_weeks(max(detected_tasks, len(task_candidates)), dependency_count, duration_samples)
+    return {
+        "project_goal": _derive_upload_project_goal(file_name, task_candidates),
+        "timeline_weeks": timeline_weeks,
+        "team_size": _estimate_upload_team_size(max(detected_tasks, len(task_candidates)), len(owner_names)),
+        "task_candidates": task_candidates,
+        "detected_tasks": max(detected_tasks, len(task_candidates)),
+        "dependency_count": max(dependency_count, len(task_candidates) - 1),
+    }
+
+
+def _extract_text_task_context(file_name: str, file_bytes: bytes, extension: str) -> dict[str, Any]:
+    if extension == ".pdf":
+        preview_text, _meta = _extract_pdf_preview(file_bytes)
+    else:
+        preview_text, _meta = _extract_docx_preview(file_bytes)
+
+    lines: list[str] = []
+    for raw_line in re.split(r"[\r\n]+", preview_text):
+        candidate = _clean_upload_line(raw_line)
+        candidate = re.sub(r"^(?:[-•*]|\d+[\.\)])\s*", "", candidate)
+        if len(candidate) < 4:
+            continue
+        if len(candidate.split()) > 12:
+            candidate = re.split(r"[.;:]", candidate, maxsplit=1)[0].strip()
+        if candidate:
+            lines.append(candidate)
+
+    task_candidates: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for line in lines:
+        normalized = _normalize_upload_token(line)
+        if not normalized or normalized in seen_names:
+            continue
+        seen_names.add(normalized)
+        task_candidates.append(
+            {
+                "name": line,
+                "source_id": str(len(task_candidates) + 1),
+                "dependency_tokens": [],
+                "duration_days": None,
+            }
+        )
+        if len(task_candidates) >= 8:
+            break
+
+    if not task_candidates:
+        task_candidates = _fallback_upload_candidates(file_name)
+
+    detected_tasks = max(len(task_candidates), min(18, max(4, len(lines))))
+    dependency_count = max(0, len(task_candidates) - 1)
+    timeline_weeks = _estimate_upload_timeline_weeks(detected_tasks, dependency_count, [])
+    return {
+        "project_goal": _derive_upload_project_goal(file_name, task_candidates),
+        "timeline_weeks": timeline_weeks,
+        "team_size": _estimate_upload_team_size(detected_tasks),
+        "task_candidates": task_candidates,
+        "detected_tasks": detected_tasks,
+        "dependency_count": dependency_count,
+    }
+
+
+def _build_upload_task_architect_tasks(
+    project_goal: str,
+    timeline_weeks: int,
+    team_size: int,
+    task_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    base_plan = generate_task_plan("Create a delivery plan", max_tasks=8, mode="mock")
+    base_tasks = [task.model_dump() for task in base_plan.tasks]
+    candidates = copy.deepcopy(task_candidates[:8]) or _fallback_upload_candidates(project_goal)
+    selected_candidates = candidates[: min(len(candidates), len(base_tasks))]
+    if len(selected_candidates) < 4:
+        selected_candidates = _fallback_upload_candidates(project_goal)[: len(base_tasks)]
+
+    target_days = max(20.0, timeline_weeks * 5.0)
+    base_total = sum(float(task["mean_duration"]) for task in base_tasks[: len(selected_candidates)])
+    schedule_scale = max(0.7, min(1.5, target_days / max(base_total, 1.0)))
+    team_factor = max(0.82, min(1.14, 1.08 - ((min(team_size, 12) - 5) * 0.03)))
+
+    normalized_lookup: dict[str, str] = {}
+    for index, candidate in enumerate(selected_candidates, start=1):
+        task_id = f"T{index}"
+        source_id = candidate.get("source_id") or str(index)
+        for token in {
+            _normalize_upload_token(task_id),
+            _normalize_upload_token(str(index)),
+            _normalize_upload_token(str(source_id)),
+            _normalize_upload_token(str(candidate["name"])),
+        }:
+            if token:
+                normalized_lookup[token] = task_id
+
+    tasks: list[dict[str, Any]] = []
+    for index, candidate in enumerate(selected_candidates, start=1):
+        task_id = f"T{index}"
+        base_task = base_tasks[min(index - 1, len(base_tasks) - 1)]
+        dependencies: list[str] = []
+        for token in candidate.get("dependency_tokens", []):
+            dependency_id = normalized_lookup.get(_normalize_upload_token(token))
+            if dependency_id and dependency_id != task_id and int(dependency_id[1:]) < index and dependency_id not in dependencies:
+                dependencies.append(dependency_id)
+
+        if not dependencies and index > 1:
+            dependencies = [f"T{index - 1}"]
+            if index > 3 and index % 3 == 1:
+                dependencies.append(f"T{index - 2}")
+
+        duration_days = candidate.get("duration_days")
+        if duration_days is None:
+            duration_days = float(base_task["mean_duration"]) * schedule_scale * team_factor
+        mean_duration = max(2, round(float(duration_days)))
+        risk_factor = min(
+            0.82,
+            max(0.18, round(float(base_task["risk_factor"]) + (len(dependencies) * 0.05), 2)),
+        )
+        std_dev = round(max(1.0, mean_duration * (0.17 + risk_factor * 0.18)), 1)
+        tasks.append(
+            {
+                **base_task,
+                "id": task_id,
+                "name": str(candidate["name"]),
+                "mean_duration": mean_duration,
+                "std_dev": std_dev,
+                "dependencies": dependencies,
+                "risk_factor": risk_factor,
+            }
+        )
+    return tasks
+
+
+def _generate_task_architect_payload_from_upload(file_name: str, file_bytes: bytes) -> dict[str, Any]:
+    extension = _uploaded_file_extension(file_name)
+    if extension in {".csv", ".xlsx"}:
+        upload_context = _extract_spreadsheet_task_context(file_name, file_bytes)
+    elif extension in {".pdf", ".docx"}:
+        upload_context = _extract_text_task_context(file_name, file_bytes, extension)
+    else:
+        raise TaskGenerationError("Upload a supported project file first.")
+
+    project_goal = upload_context["project_goal"]
+    timeline_weeks = int(upload_context["timeline_weeks"])
+    deadline_days = float(max(15, timeline_weeks * 5))
+    timeline_label = f"{timeline_weeks} weeks"
+    team_size = int(upload_context["team_size"])
+    tasks = _build_upload_task_architect_tasks(project_goal, timeline_weeks, team_size, upload_context["task_candidates"])
+    iterations = 2000
+    seed = int(st.session_state.get("saas_seed", 17))
+    graph = build_project_graph(tasks)
+    critical_path, critical_days = critical_path_by_mean(graph)
+    completion = run_monte_carlo(graph, iterations=iterations, seed=seed)
+    metrics = compute_metrics(completion, deadline_days)
+    drivers = rank_delay_drivers(graph, iterations=min(500, iterations), seed=seed)
+    scenarios_df = scenario_comparison(
+        build_project_graph,
+        tasks,
+        deadline_days=deadline_days,
+        iterations=iterations,
+        seed=seed,
+    )
+    ml_features_df, ml_predictions_df, ml_summary_df, model_status = _run_ml_scoring(tasks)
+    portfolio_df = _load_portfolio_history()
+    monitoring_df = _load_monitoring_snapshot()
+    model_metrics = _load_model_metrics()
+    portfolio_summary = _portfolio_summary(portfolio_df)
+    monitoring_summary = _monitoring_summary(monitoring_df)
+
+    return {
+        "project_text": project_goal,
+        "sample": "AI Task Architect Upload",
+        "mode": "mock",
+        "deadline_days": deadline_days,
+        "iterations": iterations,
+        "max_tasks": len(tasks),
+        "seed": seed,
+        "tasks": tasks,
+        "graph": graph,
+        "critical_path": critical_path,
+        "critical_path_days": critical_days,
+        "completion": completion,
+        "metrics": metrics,
+        "drivers": drivers,
+        "scenarios_df": scenarios_df,
+        "ml_features_df": ml_features_df,
+        "ml_predictions_df": ml_predictions_df,
+        "ml_summary_df": ml_summary_df,
+        "model_status": asdict(model_status),
+        "portfolio_df": portfolio_df,
+        "monitoring_df": monitoring_df,
+        "model_metrics": model_metrics,
+        "portfolio_summary": portfolio_summary,
+        "monitoring_summary": monitoring_summary,
+        "architect_meta": {
+            "project_goal": project_goal,
+            "timeline_text": timeline_label,
+            "timeline_weeks": timeline_weeks,
+            "team_size": team_size,
+            "source_file": file_name,
+            "detected_tasks": int(upload_context["detected_tasks"]),
+            "dependency_count": int(upload_context["dependency_count"]),
+            "generation_source": "upload",
+        },
+    }
+
+
+def _render_upload_intake_section(
+    *,
+    upload_key: str,
+    show_generate_button: bool = False,
+    generate_button_key: str | None = None,
+) -> tuple[Any | None, bool]:
     st.markdown(
-        """
+        f"""
         <div class="page-shell">
           <div class="glass dashboard-banner">
-            <span class="kicker">Project Upload</span>
-            <h1 class="page-title">Drop source files and preview how certAIn would parse them.</h1>
+            <h1 class="page-title">Upload files or define project parameters. {_brand_name_html()} transforms them into optimized, risk-aware plans.</h1>
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    uploaded = st.file_uploader("Upload .csv, .json, .xlsx, or .xml", type=["csv", "json", "xlsx", "xml", "mpp"])
+    generate_clicked = False
+    if show_generate_button and generate_button_key:
+        upload_col, action_col = st.columns([5.2, 1.35], gap="small")
+        with upload_col:
+            uploaded = st.file_uploader(
+                "Upload .xlsx, .csv, .pdf, or .docx",
+                type=["xlsx", "csv", "pdf", "docx"],
+                key=upload_key,
+                label_visibility="collapsed",
+            )
+        with action_col:
+            generate_clicked = st.button("Generate AI Plan", key=generate_button_key, use_container_width=True)
+    else:
+        uploaded = st.file_uploader(
+            "Upload .xlsx, .csv, .pdf, or .docx",
+            type=["xlsx", "csv", "pdf", "docx"],
+            key=upload_key,
+            label_visibility="collapsed",
+        )
     if uploaded is not None:
         st.success(f"Uploaded `{uploaded.name}`")
-        if uploaded.name.lower().endswith(".csv"):
-            preview_df = pd.read_csv(uploaded)
-            st.dataframe(preview_df.head(20), use_container_width=True, hide_index=True)
-        else:
-            st.info("Preview is currently optimized for CSV uploads in this prototype.")
+        _render_uploaded_file_preview(uploaded.name, uploaded.getvalue())
 
     st.markdown(
         """
         <div class="history-card">
           <strong style="font-family:Sora,sans-serif;">Supported templates</strong>
-          <p>.mpp, .xlsx, .csv, .json, and .xml are represented in the interface to support the product story.</p>
+          <p>Import: Excel, CSV, PDF, Word • Enterprise integrations (MPP, XML) coming soon</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
+    return uploaded, generate_clicked
 
 def _render_integrations() -> None:
     _render_command_bar()
@@ -5197,7 +12337,7 @@ def _render_integrations() -> None:
         <div class="feature-card">
           <span class="eyebrow">Available</span>
           <h3>{tool}</h3>
-          <p>Connect planning data and sync project status into certAIn.</p>
+          <p>Connect planning data and sync project status into {_brand_name_html()}.</p>
         </div>
         """
         for tool in integrations
@@ -5217,18 +12357,43 @@ def _render_settings_page() -> None:
         st.toggle("Email alerts", value=bool(st.session_state.saas_email_alerts), key="saas_email_alerts")
         st.toggle("In-app alerts", value=bool(st.session_state.saas_in_app_alerts), key="saas_in_app_alerts")
         st.toggle("AI alerts", value=bool(st.session_state.saas_ai_alerts), key="saas_ai_alerts")
-        st.selectbox("Language", ["English", "German", "French"], key="saas_language")
+        language_labels = [label for _, label, _ in LANGUAGE_OPTIONS]
+        current_language_label = st.session_state.get("saas_language", "English")
+        selected_language = st.selectbox(
+            "Language",
+            language_labels,
+            index=language_labels.index(current_language_label) if current_language_label in language_labels else 0,
+            key="settings_language_selector",
+        )
+        if selected_language != current_language_label:
+            selected_code = next(code for code, label, _ in LANGUAGE_OPTIONS if label == selected_language)
+            st.session_state.saas_language = selected_language
+            st.session_state.saas_language_code = selected_code
+            try:
+                st.query_params["lang"] = selected_code
+            except Exception:
+                st.experimental_set_query_params(page="settings-page", lang=selected_code)
+            st.rerun()
         st.selectbox("Region", ["Global", "EU", "US"], key="saas_region")
 
 
 def main() -> None:
     _init_state()
+    _sync_auth_email_from_query()
+    _sync_contact_email_from_query()
+    _sync_registration_email_from_query()
+    _sync_language_from_query()
     _inject_styles()
     page = _resolve_page()
+    _sync_newsletter_subscription_flow(page)
+    _sync_registration_flow(page)
     _inject_layout_state(page)
     _render_sidebar(page)
     _render_nav(page)
     _render_floating_shortcut(page)
+    _render_command_palette(page)
+    _mount_command_palette_shortcuts()
+    _mount_page_translation()
 
     if page == "home":
         _render_home()
@@ -5242,6 +12407,14 @@ def main() -> None:
         _render_pricing()
     elif page == "contact":
         _render_contact()
+    elif page == "faq":
+        _render_faq()
+    elif page in {"privacy-policy", "terms-of-service", "cookie-settings", "security-data-protection"}:
+        _render_legal_page(page)
+    elif page == "subscription-confirmation":
+        _render_subscription_confirmation()
+    elif page == "registration-confirmation":
+        _render_registration_confirmation()
     elif page == "about":
         _render_about()
     elif page == "login":
@@ -5262,8 +12435,6 @@ def main() -> None:
         _render_history()
     elif page == "summary":
         _render_summary()
-    elif page == "upload":
-        _render_upload()
     elif page == "integrations":
         _render_integrations()
     elif page == "settings-page":
@@ -5271,7 +12442,9 @@ def main() -> None:
     else:
         _render_dashboard()
 
-    _render_footer()
+    _render_footer(page)
+    _render_ai_assistant(page)
+    _mount_ai_assistant(page)
 
 
 if __name__ == "__main__":

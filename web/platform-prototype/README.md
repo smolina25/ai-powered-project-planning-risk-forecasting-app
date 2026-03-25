@@ -4,7 +4,7 @@ This folder contains a standalone polished web prototype for the `certAIn Projec
 
 It is intentionally isolated from the main Streamlit app so you can present:
 
-- the production capstone app in `app.py`
+- the production capstone app in `app1.py`
 - the public showcase in `web/showcase/`
 - this higher-fidelity product concept in `web/platform-prototype/`
 
