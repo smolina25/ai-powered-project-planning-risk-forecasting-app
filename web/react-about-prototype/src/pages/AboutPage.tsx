@@ -44,50 +44,32 @@ type TeamMember = {
   name: string;
   role: string;
   bio: string;
-  initials: string;
+  imageSrc: string;
 };
 
 type TimelineCardAlign = "left" | "right" | "mobile";
 
-function AvatarPlaceholder({ initials, name }: { initials: string; name: string }) {
-  const avatarId = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+function renderBrandAccent(text: string) {
+  const parts = text.split("certAIn");
 
+  if (parts.length === 1) {
+    return text;
+  }
+
+  return parts.flatMap((part, index) =>
+    index < parts.length - 1
+      ? [part, <span key={`brand-${index}`}>cert<span className="text-ai-gradient font-extrabold">AI</span>n</span>]
+      : [part],
+  );
+}
+
+function TeamAvatar({ src, alt }: { src: string; alt: string }) {
   return (
-    <svg
-      viewBox="0 0 96 96"
-      aria-hidden="true"
-      role="img"
-      className="mb-5 h-16 w-16 rounded-full object-cover shadow-[0_0_0_2px_rgba(138,91,255,0.75),0_0_24px_rgba(70,155,255,0.2)]"
-    >
-      <defs>
-        <linearGradient id={`avatar-ring-${avatarId}`} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#8a5bff" />
-          <stop offset="55%" stopColor="#469bff" />
-          <stop offset="100%" stopColor="#34d7ff" />
-        </linearGradient>
-      </defs>
-      <rect width="96" height="96" rx="48" fill="#0b1321" />
-      <circle
-        cx="48"
-        cy="48"
-        r="42"
-        fill="none"
-        stroke={`url(#avatar-ring-${avatarId})`}
-        strokeWidth="3.5"
-        opacity="0.8"
-      />
-      <text
-        x="48"
-        y="54"
-        textAnchor="middle"
-        fontFamily="Sora, Arial, sans-serif"
-        fontSize="28"
-        fontWeight="700"
-        fill="#eef5ff"
-      >
-        {initials}
-      </text>
-    </svg>
+    <div className="avatar-wrapper">
+      <div className="avatar team-avatar">
+        <img src={src} alt={alt} loading="lazy" decoding="async" />
+      </div>
+    </div>
   );
 }
 
@@ -324,14 +306,14 @@ function TeamSection({
             transition={{ duration: 0.48, ease: premiumEase, delay: index * 0.08 }}
             className="about-team-card"
           >
-            <AvatarPlaceholder initials={member.initials} name={member.name} />
-            <h3 className="font-display text-[1.4rem] font-semibold tracking-tight text-foreground">
+            <TeamAvatar src={member.imageSrc} alt={`${member.name} portrait`} />
+            <h3 className="text-ai-gradient font-display text-[1.4rem] font-semibold tracking-tight">
               {member.name}
             </h3>
             <p className="mt-2 text-sm font-semibold uppercase tracking-[0.12em] text-ai-gradient">
               {member.role}
             </p>
-            <p className="mt-4 text-[0.98rem] leading-6 text-muted">{member.bio}</p>
+            <p className="mt-4 text-[0.98rem] leading-6 text-muted">{renderBrandAccent(member.bio)}</p>
           </motion.article>
         ))}
       </div>
@@ -434,46 +416,52 @@ export default function AboutPage() {
   const teamMembers = useMemo<TeamMember[]>(
     () => [
       {
-        name: ensurePlainText("Eng. Meysameh Shojaei"),
-        role: ensurePlainText("CEO & Co-founder"),
+        name: ensurePlainText("Meysameh Shojaei"),
+        role: ensurePlainText("Founder & CEO"),
         bio: ensurePlainText(
-          "IT Engineer & AI Project Manager specialist. Senior VP at Apple Co., Senior IT Specialist & Project Manager at the White House.",
+          "AI Product Leader building data-driven decision systems for next-generation project planning. Leads product strategy and execution from concept to deployment. Originator of the certAIn vision, creating a scalable AI platform that redefines how teams plan, forecast risk, and make critical decisions.",
         ),
-        initials: ensurePlainText("MS"),
+        imageSrc: "/leadership_images/CEO.jpeg",
       },
       {
-        name: ensurePlainText("Eng. Santiago Molina"),
-        role: ensurePlainText("COO & Co-founder"),
+        name: ensurePlainText("Santiago Molina"),
+        role: ensurePlainText("COO"),
         bio: ensurePlainText(
-          "Industrial Engineer & AI Project Manager specializing in IT products and AI research. Senior VP Worldwide Operations at Anthropic and Executive VP of Sales and Marketing at Google.",
+          "Industrial Engineer and AI Project Leader driving end-to-end digital initiatives in international environments. Specializes in product development, workflow optimization, and operational efficiency using Agile methodologies. Experienced in large-scale transformation, including process redesign and cloud migration.",
         ),
-        initials: ensurePlainText("SM"),
+        imageSrc: "/leadership_images/COO.jpg",
       },
       {
         name: ensurePlainText("James Park"),
         role: ensurePlainText("CTO"),
-        bio: ensurePlainText("Ex-Microsoft engineer specializing in ML infrastructure and simulation systems."),
-        initials: ensurePlainText("JP"),
+        bio: ensurePlainText(
+          "Ex-Microsoft engineer building scalable ML infrastructure and high-performance systems. Expert in data pipelines, model deployment, and simulation systems for complex forecasting and decision-making applications.",
+        ),
+        imageSrc: "/leadership_images/CTO.jpg",
       },
       {
         name: ensurePlainText("Maria Smith"),
         role: ensurePlainText("CFO"),
         bio: ensurePlainText(
-          "Former Deloitte partner with 18 years in corporate finance and scaling tech ventures. Specialized in financial modeling, fundraising strategy, and operational efficiency for AI and SaaS companies.",
+          "Former Deloitte Partner with 18+ years in corporate finance and scaling technology ventures. Specializes in financial strategy, fundraising, and operational efficiency across AI and SaaS organizations.",
         ),
-        initials: ensurePlainText("MS"),
+        imageSrc: "/leadership_images/CFO.jpg",
       },
       {
-        name: ensurePlainText("Dr. Lisa Schmidt"),
+        name: ensurePlainText("Lisa Schmidt"),
         role: ensurePlainText("Head of AI"),
-        bio: ensurePlainText("PhD in Operations Research. Led predictive analytics teams at Siemens."),
-        initials: ensurePlainText("LS"),
+        bio: ensurePlainText(
+          "PhD in Operations Research leading advanced AI and predictive analytics initiatives. Expert in forecasting models, optimization, and building scalable data-driven systems for complex planning challenges.",
+        ),
+        imageSrc: "/leadership_images/Head%20AI.jpg",
       },
       {
         name: ensurePlainText("David Chen"),
         role: ensurePlainText("Head of Product"),
-        bio: ensurePlainText("Previously built project management tools at Atlassian and Asana."),
-        initials: ensurePlainText("DC"),
+        bio: ensurePlainText(
+          "Product leader with experience building project management tools at Atlassian and Asana. Focused on scalable, user-centric products that improve workflow efficiency and team collaboration.",
+        ),
+        imageSrc: "/leadership_images/Head%20Product.jpg",
       },
     ],
     [],
